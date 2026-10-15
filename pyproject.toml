@@ -1,0 +1,44 @@
+[project]
+name = "central-pedidos"
+version = "0.1.0"
+description = "Backend da Central de Pedidos Elétricos via IA (WhatsApp + Claude + Shopify)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic[email]>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "redis>=5.0",
+    "arq>=0.26",
+    "httpx>=0.27",
+    "anthropic>=1.14",
+    "openai>=1.40",
+    "gspread>=6.1",
+    "google-auth>=2.30",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.9",
+    "python-multipart>=0.0.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
