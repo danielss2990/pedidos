@@ -3,6 +3,7 @@
 python -m app.cli create-admin --nome "Fulano" --email fulano@loja.com
 python -m app.cli import-catalog data/catalogo_exemplo.csv
 python -m app.cli seed-hours
+python -m app.cli seed-demo      # dados fictícios para testar o painel
 """
 
 import argparse
@@ -57,6 +58,16 @@ async def seed_hours() -> None:
     print("Horário padrão gravado (seg–sex 8h–18h, sáb 8h–12h).")
 
 
+async def seed_demo_data() -> None:
+    from app.demo import DEMO_PASSWORD, seed_demo
+
+    async with SessionLocal() as session:
+        created = await seed_demo(session)
+        await session.commit()
+    print(f"Dados de demonstração criados. Usuários: {created or 'já existiam'}")
+    print(f"Senha de todos: {DEMO_PASSWORD}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -66,6 +77,7 @@ def main() -> None:
     imp = sub.add_parser("import-catalog")
     imp.add_argument("arquivo")
     sub.add_parser("seed-hours")
+    sub.add_parser("seed-demo")
     args = parser.parse_args()
 
     if args.command == "create-admin":
@@ -77,6 +89,8 @@ def main() -> None:
         asyncio.run(import_catalog(args.arquivo))
     elif args.command == "seed-hours":
         asyncio.run(seed_hours())
+    elif args.command == "seed-demo":
+        asyncio.run(seed_demo_data())
 
 
 if __name__ == "__main__":

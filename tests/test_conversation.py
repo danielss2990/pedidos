@@ -269,3 +269,17 @@ async def test_confirmar_sem_resumo_nao_gera_link(session, services, seeded):
     assert services.messenger.sent[-1]["phone"] == PHONE
     order = await current_order(session)
     assert order.cart_url is None
+
+
+async def test_mensagens_do_mesmo_turno_ficam_em_ordem(session, services, seeded):
+    await handle(
+        session,
+        services,
+        incoming(text="1 fita isolante"),
+        extracao(itens_novos=[item("Fita Isolante")]),
+    )
+    session.expire_all()
+    rows = (await session.scalars(select(Message).order_by(Message.created_at))).all()
+    autores = [m.enviado_por.value for m in rows]
+    assert autores == ["cliente", "bot", "bot"]  # mensagem, boas-vindas, "Anotei"
+    assert len({m.created_at for m in rows}) == len(rows)

@@ -20,8 +20,8 @@ Especificação completa: documento "Especificação do Backend — Central de P
    - no "é só isso", o bot mostra o resumo com preços e total e os botões Confirmar/Corrigir;
    - na confirmação, gera o link `https://loja/cart/variante:qtd,...` e agenda a exportação
      para a planilha.
-3. A equipe usa o painel (React, fora deste repositório) pela API `/api/v1`: caixa de entrada,
-   assumir/devolver conversa, responder, pedidos, catálogo e horário comercial.
+3. A equipe usa o painel web (`painel/`, React) sobre a API `/api/v1`: caixa de entrada,
+   assumir/devolver conversa, responder, pedidos, catálogo, horário comercial e usuários.
 
 Preços e SKUs vêm sempre do banco; o modelo nunca informa preço.
 
@@ -46,6 +46,9 @@ app/
 migrations/            Alembic
 data/catalogo_exemplo.csv  20 produtos de exemplo (formato da aba "Catalogo")
 tests/                 pytest com banco real e dublês de WhatsApp, Claude e Whisper
+painel/                painel web (React + Vite + TanStack Query)
+  src/pages/           Conversas, Pedidos, Catálogo, Horário, Usuários, Login
+  src/api.ts           cliente HTTP (token em memória, renovação pelo cookie)
 ```
 
 ## Rodando localmente
@@ -64,6 +67,24 @@ uv run uvicorn app.main:app --reload        # API em http://localhost:8000/docs
 uv run arq app.worker.WorkerSettings        # worker, em outro terminal
 ```
 
+Painel (em outro terminal), em http://localhost:3000 — o Vite encaminha `/api` para a porta 8000:
+
+```bash
+cd painel
+npm install
+npm run dev
+```
+
+Para experimentar o painel sem WhatsApp, popule dados fictícios (usuários `admin@demo.com`,
+`sueli@demo.com` e `ana@demo.com`, senha `demo12345`):
+
+```bash
+uv run python -m app.cli seed-demo
+```
+
+Sem `WHATSAPP_ACCESS_TOKEN`, a API e o worker ficam em modo simulação: as mensagens que seriam
+enviadas ao WhatsApp só aparecem no log.
+
 Para receber mensagens reais em desenvolvimento, exponha a porta 8000 (ex.: `cloudflared` ou
 `ngrok`) e cadastre `https://<url>/webhooks/whatsapp` no app da Meta com o
 `WHATSAPP_VERIFY_TOKEN`.
@@ -77,6 +98,10 @@ uv run ruff check . && uv run ruff format --check .
 ```
 
 Os testes usam o banco `pedidos_test` (ou `DATABASE_URL`), sem chamar nenhuma API externa.
+
+```bash
+cd painel && npm run typecheck && npm test
+```
 
 ## Catálogo (aba "Catalogo" da planilha)
 
@@ -105,7 +130,9 @@ docker compose up -d --build
 docker compose exec api python -m app.cli create-admin --nome "Admin" --email admin@loja.com
 ```
 
-O Caddy emite o certificado HTTPS para `DOMAIN` automaticamente. Webhooks a cadastrar:
+O serviço `caddy` é construído a partir de `painel/Dockerfile`: compila o painel e o serve em
+`https://DOMAIN/`, encaminhando `/api`, `/webhooks` e `/health` para a API (mesma origem, sem
+CORS). O Caddy emite o certificado HTTPS para `DOMAIN` automaticamente. Webhooks a cadastrar:
 
 - Meta: `https://DOMAIN/webhooks/whatsapp` (campo `messages`)
 - Shopify: `https://DOMAIN/webhooks/shopify/orders` (evento `orders/create`)
@@ -113,8 +140,9 @@ O Caddy emite o certificado HTTPS para `DOMAIN` automaticamente. Webhooks a cada
 ## Ainda não implementado
 
 - Mensagens de template (lembrete fora da janela de 24 h e retorno do atendente).
-- Eventos em tempo real para o painel (o worker já publica em `painel:eventos` no Redis; falta
-  o endpoint WebSocket).
+- Eventos em tempo real para o painel: hoje ele consulta a API a cada 4–10 s (o worker já
+  publica em `painel:eventos` no Redis; falta o endpoint WebSocket).
+- Edição de itens do pedido pelo atendente no painel.
 - Métricas (`/api/v1/metrics`) e dicionário de gírias pelo painel (a tabela já existe).
 - Armazenamento de mídia no Cloudflare R2 (hoje vai para o volume `media`) e backup automático.
 - Busca semântica por embeddings; o casamento atual usa `pg_trgm` + atributos e deve ser

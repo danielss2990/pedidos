@@ -2,12 +2,16 @@
 
 import hashlib
 import hmac
+import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
 
 from app.config import Settings
+
+log = logging.getLogger(__name__)
 
 GRAPH_URL = "https://graph.facebook.com"
 
@@ -166,3 +170,25 @@ class WhatsAppClient:
         content = await self.http.get(info["url"], headers=self._headers)
         content.raise_for_status()
         return content.content, info.get("mime_type", "application/octet-stream")
+
+
+class DryRunMessenger:
+    """Usado quando WHATSAPP_ACCESS_TOKEN está vazio: só registra o que seria enviado."""
+
+    async def send_text(self, phone: str, body: str) -> str | None:
+        log.info("[simulação] WhatsApp para %s: %s", phone, body)
+        return f"dryrun.{uuid.uuid4().hex}"
+
+    async def send_buttons(self, phone: str, body: str, buttons: list[Button]) -> str | None:
+        log.info("[simulação] WhatsApp para %s: %s %s", phone, body, [b.title for b in buttons])
+        return f"dryrun.{uuid.uuid4().hex}"
+
+    async def download_media(self, media_id: str) -> tuple[bytes, str]:
+        raise RuntimeError("download de mídia indisponível no modo simulação")
+
+
+def build_messenger(settings: Settings, http: httpx.AsyncClient) -> Messenger:
+    if not settings.whatsapp_access_token:
+        log.warning("WHATSAPP_ACCESS_TOKEN vazio: mensagens do WhatsApp em modo simulação")
+        return DryRunMessenger()
+    return WhatsAppClient(settings, http)

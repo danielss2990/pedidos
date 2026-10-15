@@ -2,15 +2,16 @@
 # Requer um arquivo .env (veja .env.example) e o DNS do domínio apontando para o VPS.
 services:
   caddy:
-    image: caddy:2.8
+    build:
+      context: .
+      dockerfile: painel/Dockerfile
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     environment:
-      DOMAIN: ${DOMAIN}
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on:
       - api
@@ -20,7 +21,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://pedidos:${POSTGRES_PASSWORD}@postgres:5432/pedidos
+      DATABASE_URL: postgresql+asyncpg://pedidos:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/pedidos
       REDIS_URL: redis://redis:6379/0
       MEDIA_DIR: /app/media
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'"
@@ -38,7 +39,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://pedidos:${POSTGRES_PASSWORD}@postgres:5432/pedidos
+      DATABASE_URL: postgresql+asyncpg://pedidos:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/pedidos
       REDIS_URL: redis://redis:6379/0
       MEDIA_DIR: /app/media
     command: arq app.worker.WorkerSettings
@@ -54,7 +55,7 @@ services:
     environment:
       POSTGRES_DB: pedidos
       POSTGRES_USER: pedidos
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

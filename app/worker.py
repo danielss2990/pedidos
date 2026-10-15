@@ -28,7 +28,7 @@ from app.services.media import LocalMediaStore
 from app.services.privacy import apply_retention
 from app.services.sheets import GoogleSheets, SheetsError
 from app.services.transcription import WhisperTranscriber
-from app.services.whatsapp import IncomingMessage, WhatsAppClient
+from app.services.whatsapp import IncomingMessage, build_messenger
 
 log = logging.getLogger(__name__)
 PANEL_CHANNEL = "painel:eventos"
@@ -48,7 +48,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["sheets"] = GoogleSheets(settings)
     ctx["services"] = Services(
         settings=settings,
-        messenger=WhatsAppClient(settings, http),
+        messenger=build_messenger(settings, http),
         extractor=ClaudeExtractor(settings, anthropic.AsyncAnthropic(), slang),
         transcriber=WhisperTranscriber(settings, openai.AsyncOpenAI()),
         cart=ShopifyCartBuilder(settings.shopify_store_domain),

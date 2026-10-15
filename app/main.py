@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.api import auth, conversations, orders, products, settings, webhooks
 from app.config import get_settings
 from app.db import SessionLocal
-from app.services.whatsapp import WhatsAppClient
+from app.services.whatsapp import build_messenger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     config = get_settings()
     async with httpx.AsyncClient(timeout=30) as http:
-        app.state.messenger = WhatsAppClient(config, http)
+        app.state.messenger = build_messenger(config, http)
         app.state.queue = await create_pool(RedisSettings.from_dsn(config.redis_url))
         try:
             yield

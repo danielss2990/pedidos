@@ -21,12 +21,15 @@ async def list_orders(
     _: CurrentUser,
     session: SessionDep,
     status_: Annotated[OrderStatus | None, Query(alias="status")] = None,
+    conversation_id: uuid.UUID | None = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
 ) -> Page[OrderOut]:
     query = select(Order)
     if status_ is not None:
         query = query.where(Order.status == status_)
+    if conversation_id is not None:
+        query = query.where(Order.conversation_id == conversation_id)
     total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = await session.scalars(
         _with_details(query).order_by(Order.created_at.desc()).limit(limit).offset(offset)

@@ -9,7 +9,18 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
-from app.models import Conversation, ConversationState, Customer, Order, Role, User
+from app.models import (
+    Conversation,
+    ConversationState,
+    Customer,
+    Message,
+    MessageDirection,
+    MessageType,
+    Order,
+    Role,
+    SentBy,
+    User,
+)
 from app.security import hash_password
 from tests.conftest import FakeMessenger
 
@@ -159,13 +170,28 @@ async def test_atendente_assume_responde_e_devolve(api, session):
     await session.commit()
     base = f"/api/v1/conversations/{conversation.id}"
 
+    session.add(
+        Message(
+            conversation_id=conversation.id,
+            direcao=MessageDirection.ENTRADA,
+            tipo=MessageType.AUDIO,
+            conteudo=None,
+            transcricao="quero falar com alguém",
+            enviado_por=SentBy.CLIENTE,
+        )
+    )
+    await session.commit()
     lista = await api.get("/api/v1/conversations?estado=atendimento_humano", headers=headers)
     assert lista.json()["total"] == 1
+    assert lista.json()["items"][0]["ultima_mensagem"]["conteudo"] == "quero falar com alguém"
 
     assert (
         await api.post(f"{base}/messages", headers=headers, json={"texto": "Oi!"})
     ).status_code == 409
-    assert (await api.post(f"{base}/assume", headers=headers)).status_code == 200
+    detalhe = await api.get(base, headers=headers)
+    assert detalhe.json()["customer"]["telefone_e164"] == "5511999998888"
+    assumida = await api.post(f"{base}/assume", headers=headers)
+    assert assumida.json()["atendente"]["nome"] == "ana@loja.com"
     r = await api.post(f"{base}/messages", headers=headers, json={"texto": "Oi, sou a Ana."})
     assert r.status_code == 201 and r.json()["enviado_por"] == "atendente"
     assert api.app.state.messenger.last == "Oi, sou a Ana."
@@ -173,7 +199,7 @@ async def test_atendente_assume_responde_e_devolve(api, session):
     r = await api.post(f"{base}/release", headers=headers)
     assert r.json()["estado"] == "coletando"
     msgs = await api.get(f"{base}/messages", headers=headers)
-    assert [m["conteudo"] for m in msgs.json()] == ["Oi, sou a Ana."]
+    assert [m["conteudo"] for m in msgs.json()] == [None, "Oi, sou a Ana."]
 
 
 async def test_catalogo_crud_e_busca(api, session):

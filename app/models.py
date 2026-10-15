@@ -1,6 +1,6 @@
 import enum
 import uuid
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -37,9 +37,17 @@ def _enum(cls: type[enum.Enum]) -> Enum:
     return Enum(cls, native_enum=False, length=32, values_callable=lambda e: [m.value for m in e])
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 class TimestampMixin:
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Horário gerado na aplicação a cada INSERT: o now() do Postgres é o início da
+    # transação, e mensagens gravadas no mesmo turno ficariam empatadas na ordenação.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

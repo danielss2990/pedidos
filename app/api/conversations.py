@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
@@ -17,7 +18,7 @@ from app.models import (
     Role,
     SentBy,
 )
-from app.schemas import ConversationOut, MessageOut, Page, SendMessageIn
+from app.schemas import ConversationOut, MessageOut, MessagePreview, Page, SendMessageIn
 from app.services.media import LocalMediaStore
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversas"])
@@ -30,7 +31,7 @@ async def _get(session: SessionDep, conversation_id: uuid.UUID) -> Conversation:
     conversation = await session.scalar(
         select(Conversation)
         .where(Conversation.id == conversation_id)
-        .options(selectinload(Conversation.customer))
+        .options(selectinload(Conversation.customer), selectinload(Conversation.atendente))
     )
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversa não encontrada")
@@ -52,13 +53,53 @@ async def list_conversations(
     if minhas:
         query = query.where(Conversation.atendente_id == user.id)
     total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    conversations = (
+        await session.scalars(
+            query.options(selectinload(Conversation.customer), selectinload(Conversation.atendente))
+            .order_by(Conversation.ultimo_contato_cliente_em.desc().nulls_last())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    previews = await _last_messages(session, [c.id for c in conversations])
+    items = []
+    for conversation in conversations:
+        out = ConversationOut.model_validate(conversation)
+        out.ultima_mensagem = previews.get(conversation.id)
+        items.append(out)
+    return Page(items=items, total=total)
+
+
+async def _last_messages(
+    session: SessionDep, conversation_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, MessagePreview]:
+    if not conversation_ids:
+        return {}
     rows = await session.scalars(
-        query.options(selectinload(Conversation.customer))
-        .order_by(Conversation.ultimo_contato_cliente_em.desc().nulls_last())
-        .limit(limit)
-        .offset(offset)
+        select(Message)
+        .where(Message.conversation_id.in_(conversation_ids))
+        .order_by(Message.conversation_id, Message.created_at.desc())
+        .ext(distinct_on(Message.conversation_id))
     )
-    return Page(items=[ConversationOut.model_validate(c) for c in rows], total=total)
+    return {
+        m.conversation_id: MessagePreview(
+            conteudo=m.transcricao or m.conteudo,
+            tipo=m.tipo,
+            enviado_por=m.enviado_por,
+            created_at=m.created_at,
+        )
+        for m in rows
+    }
+
+
+@router.get("/{conversation_id}", response_model=ConversationOut)
+async def get_conversation(
+    conversation_id: uuid.UUID, _: CurrentUser, session: SessionDep
+) -> ConversationOut:
+    conversation = await _get(session, conversation_id)
+    out = ConversationOut.model_validate(conversation)
+    out.ultima_mensagem = (await _last_messages(session, [conversation.id])).get(conversation.id)
+    return out
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageOut])
@@ -99,7 +140,7 @@ async def assume(
     if conversation.atendente_id not in (None, user.id) and user.perfil == Role.ATENDENTE:
         raise HTTPException(status.HTTP_409_CONFLICT, "Conversa já assumida por outra pessoa")
     conversation.estado = ConversationState.ATENDIMENTO_HUMANO
-    conversation.atendente_id = user.id
+    conversation.atendente = user
     await session.commit()
     return conversation
 
@@ -112,7 +153,7 @@ async def release(
     if conversation.atendente_id not in (None, user.id) and user.perfil == Role.ATENDENTE:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Conversa de outro atendente")
     conversation.estado = ConversationState.COLETANDO
-    conversation.atendente_id = None
+    conversation.atendente = None
     conversation.duvidas_sem_solucao = 0
     await session.commit()
     return conversation

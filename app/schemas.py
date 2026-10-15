@@ -62,13 +62,27 @@ class CustomerOut(ORM):
     nome: str | None
 
 
+class UserBrief(ORM):
+    id: uuid.UUID
+    nome: str
+
+
+class MessagePreview(BaseModel):
+    conteudo: str | None
+    tipo: MessageType
+    enviado_por: SentBy
+    created_at: datetime
+
+
 class ConversationOut(ORM):
     id: uuid.UUID
     estado: ConversationState
     atendente_id: uuid.UUID | None
+    atendente: UserBrief | None = None
     ultimo_contato_cliente_em: datetime | None
     updated_at: datetime
     customer: CustomerOut
+    ultima_mensagem: MessagePreview | None = None
 
 
 class MessageOut(ORM):

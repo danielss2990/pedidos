@@ -7,3 +7,5 @@ tests
 .pytest_cache
 .ruff_cache
 __pycache__
+painel/node_modules
+painel/dist
