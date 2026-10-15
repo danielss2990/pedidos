@@ -7,9 +7,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import (
     ConversationState,
+    FormaPagamento,
     ItemStatus,
     MessageDirection,
     MessageType,
+    Modalidade,
     OrderStatus,
     Role,
     SentBy,
@@ -122,12 +124,36 @@ class OrderOut(ORM):
     numero: int
     status: OrderStatus
     total: Decimal | None
-    cart_url: str | None
+    modalidade: Modalidade | None
+    endereco_entrega: str | None
+    forma_pagamento: FormaPagamento | None
+    troco_para: str | None
+    frete: Decimal | None
+    total_final: Decimal | None
+    pago_em: datetime | None
     confirmado_em: datetime | None
     exportado_planilha_em: datetime | None
     created_at: datetime
     customer: CustomerOut
     items: list[OrderItemOut]
+
+
+class FreteIn(BaseModel):
+    valor: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+
+
+class PagamentoIn(BaseModel):
+    pago: bool
+
+
+class StatusIn(BaseModel):
+    status: OrderStatus
+
+
+class OrderActionOut(BaseModel):
+    order: OrderOut
+    mensagem_enviada: bool
+    aviso: str | None = None
 
 
 # ------------------------------------------------------------------ catálogo
@@ -139,7 +165,6 @@ class ProductIn(BaseModel):
     unidade_venda: str = "unidades"
     preco: Decimal = Field(ge=0)
     ativo: bool = True
-    shopify_variant_id: str | None = None
     sinonimos: list[str] = []
 
 
@@ -150,7 +175,6 @@ class ProductUpdate(BaseModel):
     unidade_venda: str | None = None
     preco: Decimal | None = Field(default=None, ge=0)
     ativo: bool | None = None
-    shopify_variant_id: str | None = None
     sinonimos: list[str] | None = None
 
 
@@ -163,7 +187,6 @@ class ProductOut(ORM):
     unidade_venda: str
     preco: Decimal
     ativo: bool
-    shopify_variant_id: str | None
     sinonimos: list[str] = []
 
 

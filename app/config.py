@@ -30,10 +30,11 @@ class Settings(BaseSettings):
     # Whisper (transcrição). A chave vem de OPENAI_API_KEY, lida pelo SDK.
     whisper_model: str = "whisper-1"
 
-    # Shopify
-    shopify_store_domain: str = ""
-    shopify_admin_token: str = ""
-    shopify_webhook_secret: str = ""
+    # Loja e pagamento (usados nas mensagens de fechamento do pedido)
+    loja_nome: str = "nossa loja"
+    loja_endereco: str = ""
+    pix_chave: str = ""
+    pix_titular: str = ""
 
     # Google Sheets
     google_service_account_file: str = ""

@@ -5,18 +5,24 @@ export type Role = "admin" | "supervisor" | "atendente";
 export type ConversationState =
   | "coletando"
   | "aguardando_confirmacao"
-  | "atendimento_humano"
-  | "concluido";
+  | "fechando"
+  | "pedido_em_andamento"
+  | "atendimento_humano";
 
 export type OrderStatus =
   | "rascunho"
   | "aguardando_confirmacao"
+  | "fechando"
   | "confirmado"
-  | "carrinho_enviado"
-  | "pago"
+  | "em_separacao"
+  | "pronto"
+  | "concluido"
   | "cancelado";
 
-export type MessageType = "texto" | "audio" | "imagem" | "botao" | "outro";
+export type Modalidade = "retirada" | "entrega";
+export type FormaPagamento = "pix" | "cartao" | "dinheiro";
+
+export type MessageType = "texto" | "audio" | "imagem" | "botao" | "localizacao" | "outro";
 export type SentBy = "cliente" | "bot" | "atendente";
 
 export interface User {
@@ -84,7 +90,13 @@ export interface Order {
   numero: number;
   status: OrderStatus;
   total: string | null;
-  cart_url: string | null;
+  modalidade: Modalidade | null;
+  endereco_entrega: string | null;
+  forma_pagamento: FormaPagamento | null;
+  troco_para: string | null;
+  frete: string | null;
+  total_final: string | null;
+  pago_em: string | null;
   confirmado_em: string | null;
   exportado_planilha_em: string | null;
   created_at: string;
@@ -101,7 +113,6 @@ export interface Product {
   unidade_venda: string;
   preco: string;
   ativo: boolean;
-  shopify_variant_id: string | null;
   sinonimos: string[];
 }
 
@@ -109,6 +120,12 @@ export interface BusinessHours {
   dia_semana: number;
   abre: string;
   fecha: string;
+}
+
+export interface OrderAction {
+  order: Order;
+  mensagem_enviada: boolean;
+  aviso: string | null;
 }
 
 export interface Page<T> {

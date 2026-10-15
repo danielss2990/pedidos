@@ -7,10 +7,18 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { ErrorBox, Empty, Icon, OrderBadge, StateBadge } from "../components/ui";
 import MessageBubble from "../components/MessageBubble";
-import { brl, customerName, phone, quantity, relative } from "../format";
+import {
+  MODALIDADE_LABEL,
+  PAGAMENTO_LABEL,
+  brl,
+  customerName,
+  phone,
+  quantity,
+  relative,
+} from "../format";
 import type { Conversation, Message, Order, Page } from "../types";
 
-type FilterKey = "fila" | "minhas" | "bot" | "todas";
+type FilterKey = "fila" | "minhas" | "andamento" | "bot" | "todas";
 
 const FILTERS: {
   key: FilterKey;
@@ -26,10 +34,15 @@ const FILTERS: {
   },
   { key: "minhas", label: "Minhas", query: { minhas: true } },
   {
+    key: "andamento",
+    label: "Pedidos em andamento",
+    query: { estado: "pedido_em_andamento" },
+  },
+  {
     key: "bot",
     label: "Com o bot",
     query: {},
-    keep: (c) => c.estado === "coletando" || c.estado === "aguardando_confirmacao",
+    keep: (c) => ["coletando", "aguardando_confirmacao", "fechando"].includes(c.estado),
   },
   { key: "todas", label: "Todas", query: {} },
 ];
@@ -273,7 +286,7 @@ function OrderPanel({ orders }: { orders: Order[] }) {
         <>
           <div className="order-panel-head">
             <Link to={`/pedidos/${order.id}`}>Nº {order.numero}</Link>
-            <OrderBadge status={order.status} />
+            <OrderBadge status={order.status} modalidade={order.modalidade} />
           </div>
           <ul className="order-items">
             {order.items.map((it) => (
@@ -291,13 +304,38 @@ function OrderPanel({ orders }: { orders: Order[] }) {
           </ul>
           {order.total && (
             <p className="order-total">
-              Total <strong>{brl(order.total)}</strong>
+              Total <strong>{brl(order.total_final ?? order.total)}</strong>
             </p>
           )}
-          {order.cart_url && (
-            <a className="btn small" href={order.cart_url} target="_blank" rel="noreferrer">
-              <Icon name="link" /> Link do carrinho
-            </a>
+          {order.modalidade && (
+            <dl className="order-closing">
+              <dt>{MODALIDADE_LABEL[order.modalidade]}</dt>
+              <dd>
+                {order.endereco_entrega ??
+                  (order.modalidade === "retirada" ? "Na loja" : "Endereço a confirmar")}
+              </dd>
+              {order.modalidade === "entrega" && (
+                <>
+                  <dt>Frete</dt>
+                  <dd>{order.frete === null ? "A informar" : brl(order.frete)}</dd>
+                </>
+              )}
+              {order.forma_pagamento && (
+                <>
+                  <dt>Pagamento</dt>
+                  <dd>
+                    {PAGAMENTO_LABEL[order.forma_pagamento]}
+                    {order.troco_para ? ` (troco para ${order.troco_para})` : ""}
+                    {order.pago_em ? " · pago" : ""}
+                  </dd>
+                </>
+              )}
+            </dl>
+          )}
+          {["confirmado", "em_separacao", "pronto"].includes(order.status) && (
+            <Link className="btn small" to={`/pedidos/${order.id}`}>
+              Acompanhar pedido
+            </Link>
           )}
           {orders.length > 1 && (
             <p className="muted small-text">{orders.length - 1} pedido(s) anterior(es)</p>

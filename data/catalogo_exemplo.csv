@@ -1,21 +1,21 @@
-sku,nome_tecnico,categoria,unidade_venda,preco,shopify_variant_id,atributos,sinonimos,ativo
-CAB-FLX-15-AZ,"Cabo Flexível 1,5mm² 750V Azul",cabos,metros,"1,45",,bitola_mm2=1.5; cor=Azul; tensao_v=750,fio 1.5; fio de um e meio,sim
-CAB-FLX-15-PT,"Cabo Flexível 1,5mm² 750V Preto",cabos,metros,"1,45",,bitola_mm2=1.5; cor=Preto; tensao_v=750,fio 1.5; fio de um e meio,sim
-CAB-FLX-25-AZ,"Cabo Flexível 2,5mm² 750V Azul",cabos,metros,"2,10",,bitola_mm2=2.5; cor=Azul; tensao_v=750,fio 2.5; fio de dois e meio; fio de duas metade,sim
-CAB-FLX-25-PT,"Cabo Flexível 2,5mm² 750V Preto",cabos,metros,"2,10",,bitola_mm2=2.5; cor=Preto; tensao_v=750,fio 2.5; fio de dois e meio,sim
-CAB-FLX-25-VM,"Cabo Flexível 2,5mm² 750V Vermelho",cabos,metros,"2,10",,bitola_mm2=2.5; cor=Vermelho; tensao_v=750,fio 2.5; fio de dois e meio,sim
-CAB-FLX-25-VD,"Cabo Flexível 2,5mm² 750V Verde",cabos,metros,"2,10",,bitola_mm2=2.5; cor=Verde; tensao_v=750,fio terra 2.5; fio verde,sim
-CAB-FLX-40-PT,Cabo Flexível 4mm² 750V Preto,cabos,metros,"3,40",,bitola_mm2=4; cor=Preto; tensao_v=750,fio 4; fio de quatro,sim
-CAB-FLX-60-PT,Cabo Flexível 6mm² 750V Preto,cabos,metros,"5,20",,bitola_mm2=6; cor=Preto; tensao_v=750,fio 6; fio de seis,sim
-TOM-2PT-10-BR,Tomada de Embutir 2P+T 10A Branca,tomadas,unidades,"8,90",,corrente_a=10; cor=Branca; tipo=embutir,tomada de 10; tomada 10a,sim
-TOM-2PT-20-BR,Tomada de Embutir 2P+T 20A Branca,tomadas,unidades,"10,90",,corrente_a=20; cor=Branca; tipo=embutir,tomada de 20; tomada 20a,sim
-INT-SIM-10-BR,Interruptor Simples 10A Branco,interruptores,unidades,"7,50",,corrente_a=10; cor=Branco,interruptor; tecla simples,sim
-DIS-1P-10,Minidisjuntor DIN 1P 10A Curva C,disjuntores,unidades,"14,90",,corrente_a=10; polos=1,disjuntor 10; disjuntor de 10,sim
-DIS-1P-20,Minidisjuntor DIN 1P 20A Curva C,disjuntores,unidades,"14,90",,corrente_a=20; polos=1,disjuntor 20; disjuntor de 20,sim
-DIS-2P-32,Minidisjuntor DIN 2P 32A Curva C,disjuntores,unidades,"42,00",,corrente_a=32; polos=2,disjuntor bipolar 32,sim
-ELE-COR-20,Eletroduto Corrugado Flexível 20mm (rolo 50m),eletrodutos,rolos,"62,00",,diametro_mm=20,conduíte 20; corrugado 3/4; mangueira amarela,sim
-ELE-COR-25,Eletroduto Corrugado Flexível 25mm (rolo 50m),eletrodutos,rolos,"79,00",,diametro_mm=25,conduíte 25; corrugado 1 polegada,sim
-FIT-ISO-20,Fita Isolante 19mm x 20m Preta,acessorios,unidades,"9,90",,cor=Preta,fita isolante; fita preta,sim
-FIT-PAS-20,Fita Passa-Fio de Aço 20m,ferramentas,unidades,"39,90",,,passa-fio; sonda; guia,sim
-PLA-4X2-BR,Placa 4x2 Cega Branca,placas,unidades,"3,20",,cor=Branca,espelho 4x2; tampa cega,sim
-LAM-LED-9,Lâmpada LED Bulbo 9W Bivolt Branca Fria,iluminacao,unidades,"9,50",,potencia_w=9,lampada 9w; lampada de led,sim
+sku,nome_tecnico,categoria,unidade_venda,preco,atributos,sinonimos,ativo
+CAB-FLX-15-AZ,"Cabo Flexível 1,5mm² 750V Azul",cabos,metros,"1,45",bitola_mm2=1.5; cor=Azul; tensao_v=750,fio 1.5; fio de um e meio,sim
+CAB-FLX-15-PT,"Cabo Flexível 1,5mm² 750V Preto",cabos,metros,"1,45",bitola_mm2=1.5; cor=Preto; tensao_v=750,fio 1.5; fio de um e meio,sim
+CAB-FLX-25-AZ,"Cabo Flexível 2,5mm² 750V Azul",cabos,metros,"2,10",bitola_mm2=2.5; cor=Azul; tensao_v=750,fio 2.5; fio de dois e meio; fio de duas metade,sim
+CAB-FLX-25-PT,"Cabo Flexível 2,5mm² 750V Preto",cabos,metros,"2,10",bitola_mm2=2.5; cor=Preto; tensao_v=750,fio 2.5; fio de dois e meio,sim
+CAB-FLX-25-VM,"Cabo Flexível 2,5mm² 750V Vermelho",cabos,metros,"2,10",bitola_mm2=2.5; cor=Vermelho; tensao_v=750,fio 2.5; fio de dois e meio,sim
+CAB-FLX-25-VD,"Cabo Flexível 2,5mm² 750V Verde",cabos,metros,"2,10",bitola_mm2=2.5; cor=Verde; tensao_v=750,fio terra 2.5; fio verde,sim
+CAB-FLX-40-PT,Cabo Flexível 4mm² 750V Preto,cabos,metros,"3,40",bitola_mm2=4; cor=Preto; tensao_v=750,fio 4; fio de quatro,sim
+CAB-FLX-60-PT,Cabo Flexível 6mm² 750V Preto,cabos,metros,"5,20",bitola_mm2=6; cor=Preto; tensao_v=750,fio 6; fio de seis,sim
+TOM-2PT-10-BR,Tomada de Embutir 2P+T 10A Branca,tomadas,unidades,"8,90",corrente_a=10; cor=Branca; tipo=embutir,tomada de 10; tomada 10a,sim
+TOM-2PT-20-BR,Tomada de Embutir 2P+T 20A Branca,tomadas,unidades,"10,90",corrente_a=20; cor=Branca; tipo=embutir,tomada de 20; tomada 20a,sim
+INT-SIM-10-BR,Interruptor Simples 10A Branco,interruptores,unidades,"7,50",corrente_a=10; cor=Branco,interruptor; tecla simples,sim
+DIS-1P-10,Minidisjuntor DIN 1P 10A Curva C,disjuntores,unidades,"14,90",corrente_a=10; polos=1,disjuntor 10; disjuntor de 10,sim
+DIS-1P-20,Minidisjuntor DIN 1P 20A Curva C,disjuntores,unidades,"14,90",corrente_a=20; polos=1,disjuntor 20; disjuntor de 20,sim
+DIS-2P-32,Minidisjuntor DIN 2P 32A Curva C,disjuntores,unidades,"42,00",corrente_a=32; polos=2,disjuntor bipolar 32,sim
+ELE-COR-20,Eletroduto Corrugado Flexível 20mm (rolo 50m),eletrodutos,rolos,"62,00",diametro_mm=20,conduíte 20; corrugado 3/4; mangueira amarela,sim
+ELE-COR-25,Eletroduto Corrugado Flexível 25mm (rolo 50m),eletrodutos,rolos,"79,00",diametro_mm=25,conduíte 25; corrugado 1 polegada,sim
+FIT-ISO-20,Fita Isolante 19mm x 20m Preta,acessorios,unidades,"9,90",cor=Preta,fita isolante; fita preta,sim
+FIT-PAS-20,Fita Passa-Fio de Aço 20m,ferramentas,unidades,"39,90",,passa-fio; sonda; guia,sim
+PLA-4X2-BR,Placa 4x2 Cega Branca,placas,unidades,"3,20",cor=Branca,espelho 4x2; tampa cega,sim
+LAM-LED-9,Lâmpada LED Bulbo 9W Bivolt Branca Fria,iluminacao,unidades,"9,50",potencia_w=9,lampada 9w; lampada de led,sim

@@ -57,7 +57,6 @@ export default function CatalogPage() {
       setTimeout(() => void queryClient.invalidateQueries({ queryKey: ["products"] }), 5_000),
   });
   const items = products.data?.items ?? [];
-  const missingVariant = items.filter((p) => p.ativo && !p.shopify_variant_id).length;
 
   return (
     <div className="page">
@@ -93,12 +92,6 @@ export default function CatalogPage() {
         )}
       </header>
       <ErrorBox error={products.error || sync.error} />
-      {missingVariant > 0 && (
-        <div className="notice warning">
-          {missingVariant} produto(s) ativo(s) sem variante Shopify. Pedidos com esses itens não
-          geram link de carrinho e vão para atendimento humano.
-        </div>
-      )}
       <div className="table-wrap">
         <table>
           <thead>
@@ -108,7 +101,6 @@ export default function CatalogPage() {
               <th>Categoria</th>
               <th>Unidade</th>
               <th className="num">Preço</th>
-              <th>Shopify</th>
               {isAdmin && <th aria-label="Ações" />}
             </tr>
           </thead>
@@ -125,13 +117,6 @@ export default function CatalogPage() {
                 <td>{p.categoria ?? "—"}</td>
                 <td>{p.unidade_venda}</td>
                 <td className="num">{brl(p.preco)}</td>
-                <td>
-                  {p.shopify_variant_id ? (
-                    <span className="mono">{p.shopify_variant_id}</span>
-                  ) : (
-                    <span className="badge warning">Sem variante</span>
-                  )}
-                </td>
                 {isAdmin && (
                   <td>
                     <button className="btn small ghost" onClick={() => setEditing(p)}>
@@ -178,7 +163,6 @@ function ProductForm({
     categoria: product?.categoria ?? "",
     unidade_venda: product?.unidade_venda ?? "unidades",
     preco: product?.preco ?? "",
-    shopify_variant_id: product?.shopify_variant_id ?? "",
     atributos: formatAttributes(product?.atributos ?? {}),
     sinonimos: (product?.sinonimos ?? []).join("; "),
     ativo: product?.ativo ?? true,
@@ -193,7 +177,6 @@ function ProductForm({
         categoria: form.categoria.trim() || null,
         unidade_venda: form.unidade_venda,
         preco: form.preco.replace(",", "."),
-        shopify_variant_id: form.shopify_variant_id.trim() || null,
         atributos: parseAttributes(form.atributos),
         sinonimos: form.sinonimos
           .split(";")
@@ -261,13 +244,6 @@ function ProductForm({
               <option key={u}>{u}</option>
             ))}
           </select>
-        </Field>
-        <Field label="Variante Shopify" hint="Necessária para gerar o link do carrinho.">
-          <input
-            inputMode="numeric"
-            value={form.shopify_variant_id}
-            onChange={(e) => set("shopify_variant_id")(e.target.value)}
-          />
         </Field>
         <Field
           label="Atributos"

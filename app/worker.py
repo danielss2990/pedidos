@@ -21,7 +21,6 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Order, OrderItem, SlangTerm
 from app.services import catalog
-from app.services.cart import ShopifyCartBuilder
 from app.services.conversation import ConversationEngine, Services, expire_drafts, send_reminders
 from app.services.extraction import ClaudeExtractor
 from app.services.media import LocalMediaStore
@@ -51,7 +50,6 @@ async def startup(ctx: dict[str, Any]) -> None:
         messenger=build_messenger(settings, http),
         extractor=ClaudeExtractor(settings, anthropic.AsyncAnthropic(), slang),
         transcriber=WhisperTranscriber(settings, openai.AsyncOpenAI()),
-        cart=ShopifyCartBuilder(settings.shopify_store_domain),
         media=LocalMediaStore(settings.media_dir),
         now=_now,
     )

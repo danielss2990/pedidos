@@ -19,8 +19,11 @@ ORDER_HEADER = [
     "preco_unitario",
     "subtotal",
     "total_pedido",
+    "modalidade",
+    "endereco_entrega",
+    "pagamento",
+    "troco_para",
     "status",
-    "link_carrinho",
 ]
 
 
@@ -55,8 +58,11 @@ def order_rows(order: Order, settings: Settings) -> list[list[str]]:
                 f"{preco:.2f}",
                 f"{preco * item.quantidade:.2f}",
                 f"{order.total or 0:.2f}",
+                order.modalidade.value if order.modalidade else "",
+                order.endereco_entrega or "",
+                order.forma_pagamento.value if order.forma_pagamento else "",
+                order.troco_para or "",
                 order.status.value,
-                order.cart_url or "",
             ]
         )
     return rows

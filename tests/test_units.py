@@ -9,9 +9,8 @@ from typing import Any
 import pytest
 
 from app.config import get_settings
-from app.models import Order, OrderItem, Product
+from app.models import FormaPagamento, Modalidade, Order
 from app.services.business_hours import DEFAULT_HOURS, Schedule
-from app.services.cart import CartError, ShopifyCartBuilder
 from app.services.catalog import attribute_score, parse_attributes, parse_price
 from app.services.extraction import (
     ClaudeExtractor,
@@ -19,6 +18,13 @@ from app.services.extraction import (
     ExtractionError,
     ExtractionInput,
     build_user_content,
+)
+from app.services.fulfillment import (
+    frete_message,
+    next_closing_step,
+    parse_modalidade,
+    parse_pagamento,
+    parse_troco,
 )
 from app.services.text import brl, normalize, qty
 from app.services.whatsapp import parse_webhook, verify_signature
@@ -102,37 +108,64 @@ def test_horario_comercial():
     assert "segunda das 08:00 às 18:00" in schedule.describe()
 
 
-def _order(*items: tuple[str | None, str]) -> Order:
-    order = Order(numero=1001, items=[])
-    for i, (variant, quantidade) in enumerate(items, 1):
-        product = Product(
-            sku=f"S{i}", nome_tecnico=f"P{i}", preco=Decimal(1), shopify_variant_id=variant
-        )
-        order.items.append(
-            OrderItem(
-                posicao=i,
-                product=product,
-                item_normalizado=f"P{i}",
-                descricao_original="",
-                quantidade=Decimal(quantidade),
-                unidade="unidades",
-            )
-        )
-    return order
+def test_parse_respostas_do_fechamento():
+    assert parse_modalidade("entrega", "") == Modalidade.ENTREGA
+    assert parse_modalidade(None, "Vou buscar aí mais tarde") == Modalidade.RETIRADA
+    assert parse_modalidade(None, "pode entregar") == Modalidade.ENTREGA
+    assert parse_modalidade(None, "sim") is None
+    assert parse_pagamento("cartao", "") == FormaPagamento.CARTAO
+    assert parse_pagamento(None, "no PIX") == FormaPagamento.PIX
+    assert parse_pagamento(None, "débito") == FormaPagamento.CARTAO
+    assert parse_pagamento(None, "em espécie") == FormaPagamento.DINHEIRO
+    assert parse_troco("Não precisa") == ""
+    assert parse_troco("para 50") == "para 50"
 
 
-def test_link_do_carrinho():
-    url = ShopifyCartBuilder("https://loja.test/").build_url(
-        _order(("111", "2"), ("222", "2.5")), "5511"
+def _closing_order(**fields: Any) -> Order:
+    return Order(numero=1001, total=Decimal("100"), items=[], **fields)
+
+
+def test_proximo_passo_do_fechamento():
+    order = _closing_order()
+    assert next_closing_step(order) == "modalidade"
+    order.modalidade = Modalidade.ENTREGA
+    assert next_closing_step(order) == "endereco"
+    order.endereco_entrega = "Rua A, 1"
+    assert next_closing_step(order) == "pagamento"
+    order.forma_pagamento = FormaPagamento.DINHEIRO
+    assert next_closing_step(order) == "troco"
+    order.troco_para = ""
+    assert next_closing_step(order) is None
+    retirada = _closing_order(
+        modalidade=Modalidade.RETIRADA, forma_pagamento=FormaPagamento.DINHEIRO
     )
-    assert url.startswith("https://loja.test/cart/111:2,222:3?")
-    assert "attributes%5Bpedido_whatsapp%5D=1001" in url
-    assert "%2B5511" in url
+    assert next_closing_step(retirada) is None  # troco só na entrega
 
 
-def test_link_do_carrinho_sem_variante():
-    with pytest.raises(CartError, match="P2"):
-        ShopifyCartBuilder("loja.test").build_url(_order(("111", "1"), (None, "1")), None)
+def test_mensagem_de_frete_com_pix():
+    settings = get_settings()
+    order = _closing_order(
+        modalidade=Modalidade.ENTREGA, forma_pagamento=FormaPagamento.PIX, frete=Decimal("15")
+    )
+    text = frete_message(order, settings)
+    assert "frete de R$ 15,00" in text
+    assert "Total a pagar: R$ 115,00" in text
+    assert "Pague R$ 115,00 pela chave Pix pix@loja.com" in text
+
+
+def test_parse_localizacao():
+    payload = _webhook(
+        {
+            "from": "5511999998888",
+            "id": "w9",
+            "timestamp": "1",
+            "type": "location",
+            "location": {"latitude": -23.5, "longitude": -46.6, "name": "Obra", "address": "Rua A"},
+        }
+    )
+    msg = parse_webhook(payload)[0]
+    assert msg.kind == "location"
+    assert msg.text == "Obra, Rua A (https://maps.google.com/?q=-23.5,-46.6)"
 
 
 def test_formatacao():

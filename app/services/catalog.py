@@ -138,7 +138,7 @@ def _truthy(raw: Any) -> bool:
 async def import_rows(session: AsyncSession, rows: list[dict[str, Any]]) -> dict[str, int]:
     """Insere ou atualiza produtos a partir das linhas da planilha (colunas em minúsculo).
 
-    Colunas: sku, nome_tecnico, categoria, unidade_venda, preco, shopify_variant_id,
+    Colunas: sku, nome_tecnico, categoria, unidade_venda, preco,
     atributos ("bitola_mm2=2.5; cor=Azul"), sinonimos ("fio 2,5; fio de dois e meio"), ativo.
     """
     stats = {"criados": 0, "atualizados": 0, "ignorados": 0}
@@ -171,7 +171,6 @@ async def import_rows(session: AsyncSession, rows: list[dict[str, Any]]) -> dict
         product.categoria = str(row.get("categoria") or "").strip() or None
         product.unidade_venda = str(row.get("unidade_venda") or "unidades").strip()
         product.preco = preco
-        product.shopify_variant_id = str(row.get("shopify_variant_id") or "").strip() or None
         product.atributos = parse_attributes(row.get("atributos"))
         product.ativo = _truthy(row.get("ativo"))
 

@@ -1,4 +1,4 @@
-import type { ConversationState, OrderStatus, Role } from "./types";
+import type { ConversationState, FormaPagamento, Modalidade, OrderStatus, Role } from "./types";
 
 const brlFormat = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -41,18 +41,40 @@ export function relative(iso: string | null, now: Date = new Date()): string {
 export const STATE_LABEL: Record<ConversationState, string> = {
   coletando: "Com o bot",
   aguardando_confirmacao: "Aguardando confirmação",
+  fechando: "Fechando pedido",
+  pedido_em_andamento: "Pedido em andamento",
   atendimento_humano: "Atendimento humano",
-  concluido: "Concluída",
 };
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   rascunho: "Rascunho",
   aguardando_confirmacao: "Aguardando confirmação",
-  confirmado: "Confirmado",
-  carrinho_enviado: "Carrinho enviado",
-  pago: "Pago",
+  fechando: "Fechando com o cliente",
+  confirmado: "Novo",
+  em_separacao: "Em separação",
+  pronto: "Pronto",
+  concluido: "Concluído",
   cancelado: "Cancelado",
 };
+
+export const MODALIDADE_LABEL: Record<Modalidade, string> = {
+  retirada: "Retirada",
+  entrega: "Entrega",
+};
+
+export const PAGAMENTO_LABEL: Record<FormaPagamento, string> = {
+  pix: "Pix",
+  cartao: "Cartão",
+  dinheiro: "Dinheiro",
+};
+
+/** "Pronto" significa coisas diferentes para retirada e entrega. */
+export function orderStatusLabel(status: OrderStatus, modalidade: Modalidade | null): string {
+  if (status === "pronto") {
+    return modalidade === "entrega" ? "Saiu para entrega" : "Pronto para retirada";
+  }
+  return ORDER_STATUS_LABEL[status];
+}
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Administrador",

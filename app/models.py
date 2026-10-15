@@ -62,8 +62,11 @@ class Role(enum.StrEnum):
 class ConversationState(enum.StrEnum):
     COLETANDO = "coletando"
     AGUARDANDO_CONFIRMACAO = "aguardando_confirmacao"
+    # Cliente confirmou os itens; o bot pergunta entrega/retirada e pagamento.
+    FECHANDO = "fechando"
+    # Pedido fechado e com a equipe (separação, frete, pagamento); o bot só avisa que recebeu.
+    PEDIDO_EM_ANDAMENTO = "pedido_em_andamento"
     ATENDIMENTO_HUMANO = "atendimento_humano"
-    CONCLUIDO = "concluido"
 
 
 class MessageDirection(enum.StrEnum):
@@ -76,6 +79,7 @@ class MessageType(enum.StrEnum):
     AUDIO = "audio"
     IMAGEM = "imagem"
     BOTAO = "botao"
+    LOCALIZACAO = "localizacao"
     OUTRO = "outro"
 
 
@@ -88,13 +92,33 @@ class SentBy(enum.StrEnum):
 class OrderStatus(enum.StrEnum):
     RASCUNHO = "rascunho"
     AGUARDANDO_CONFIRMACAO = "aguardando_confirmacao"
+    FECHANDO = "fechando"
     CONFIRMADO = "confirmado"
-    CARRINHO_ENVIADO = "carrinho_enviado"
-    PAGO = "pago"
+    EM_SEPARACAO = "em_separacao"
+    PRONTO = "pronto"
+    CONCLUIDO = "concluido"
     CANCELADO = "cancelado"
 
 
-OPEN_ORDER_STATUSES = (OrderStatus.RASCUNHO, OrderStatus.AGUARDANDO_CONFIRMACAO)
+# Pedidos ainda sendo montados pelo bot com o cliente.
+OPEN_ORDER_STATUSES = (
+    OrderStatus.RASCUNHO,
+    OrderStatus.AGUARDANDO_CONFIRMACAO,
+    OrderStatus.FECHANDO,
+)
+# Pedidos fechados que a equipe ainda está atendendo.
+ACTIVE_ORDER_STATUSES = (OrderStatus.CONFIRMADO, OrderStatus.EM_SEPARACAO, OrderStatus.PRONTO)
+
+
+class Modalidade(enum.StrEnum):
+    RETIRADA = "retirada"
+    ENTREGA = "entrega"
+
+
+class FormaPagamento(enum.StrEnum):
+    PIX = "pix"
+    CARTAO = "cartao"
+    DINHEIRO = "dinheiro"
 
 
 class ItemStatus(enum.StrEnum):
@@ -132,7 +156,6 @@ class Product(TimestampMixin, Base):
     unidade_venda: Mapped[str] = mapped_column(String(20), default="unidades")
     preco: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    shopify_variant_id: Mapped[str | None] = mapped_column(String(64))
     # Texto normalizado (minúsculo, sem acento) com nome, categoria e sinônimos,
     # usado na busca por similaridade (pg_trgm).
     search_text: Mapped[str] = mapped_column(Text, default="")
@@ -180,6 +203,7 @@ class Conversation(TimestampMixin, Base):
     ultimo_contato_cliente_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lembrete_enviado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     aviso_fora_horario_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    aviso_pedido_em_andamento_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duvidas_sem_solucao: Mapped[int] = mapped_column(SmallInteger, default=0)
 
     customer: Mapped[Customer] = relationship()
@@ -211,12 +235,25 @@ class Order(TimestampMixin, Base):
     customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id"), index=True)
     status: Mapped[OrderStatus] = mapped_column(_enum(OrderStatus), default=OrderStatus.RASCUNHO)
     total: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
-    cart_url: Mapped[str | None] = mapped_column(Text)
-    shopify_order_id: Mapped[str | None] = mapped_column(String(64))
+    modalidade: Mapped[Modalidade | None] = mapped_column(_enum(Modalidade))
+    endereco_entrega: Mapped[str | None] = mapped_column(Text)
+    forma_pagamento: Mapped[FormaPagamento | None] = mapped_column(_enum(FormaPagamento))
+    # None = ainda não perguntado; "" = não precisa de troco.
+    troco_para: Mapped[str | None] = mapped_column(String(80))
+    # Informado pela equipe nos pedidos com entrega.
+    frete: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    pago_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exportado_planilha_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Cliente pediu para fechar enquanto havia dúvida aberta: mostrar o resumo ao resolvê-la.
     finalizar_pendente: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    @property
+    def total_final(self) -> Decimal | None:
+        """Total dos itens mais o frete (quando já informado)."""
+        if self.total is None:
+            return None
+        return self.total + (self.frete or Decimal(0))
 
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order",

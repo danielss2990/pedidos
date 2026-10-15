@@ -1,8 +1,8 @@
-import base64
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -13,10 +13,13 @@ from app.models import (
     Conversation,
     ConversationState,
     Customer,
+    FormaPagamento,
     Message,
     MessageDirection,
     MessageType,
+    Modalidade,
     Order,
+    OrderStatus,
     Role,
     SentBy,
     User,
@@ -240,30 +243,82 @@ async def test_horario_comercial_api(api, session):
     ] == "07:30:00"
 
 
-async def test_webhook_shopify_marca_pago(api, session):
-    customer = Customer(telefone_e164="5511")
+async def _pedido_fechado(session, ultimo_contato: datetime) -> tuple[Conversation, Order]:
+    customer = Customer(telefone_e164="5511999998888")
     session.add(customer)
     await session.flush()
-    conversation = Conversation(customer_id=customer.id, duvidas_sem_solucao=0)
+    conversation = Conversation(
+        customer_id=customer.id,
+        estado=ConversationState.PEDIDO_EM_ANDAMENTO,
+        duvidas_sem_solucao=0,
+        ultimo_contato_cliente_em=ultimo_contato,
+    )
     session.add(conversation)
     await session.flush()
     order = Order(
-        conversation_id=conversation.id, customer_id=customer.id, finalizar_pendente=False
+        conversation_id=conversation.id,
+        customer_id=customer.id,
+        status=OrderStatus.CONFIRMADO,
+        total=Decimal("100.00"),
+        modalidade=Modalidade.ENTREGA,
+        endereco_entrega="Rua A, 1",
+        forma_pagamento=FormaPagamento.PIX,
+        confirmado_em=datetime.now(UTC),
+        finalizar_pendente=False,
     )
     session.add(order)
     await session.commit()
-    await session.refresh(order)
+    return conversation, order
 
-    payload = {
-        "id": 555,
-        "financial_status": "paid",
-        "note_attributes": [{"name": "pedido_whatsapp", "value": str(order.numero)}],
-    }
-    body = json.dumps(payload).encode()
-    sig = base64.b64encode(hmac.new(b"segredo-shopify", body, hashlib.sha256).digest()).decode()
+
+async def test_equipe_acompanha_pedido_ate_concluir(api, session):
+    await _user(session, Role.ATENDENTE, "ana@loja.com")
+    headers = await _login(api, "ana@loja.com")
+    conversation, order = await _pedido_fechado(session, datetime.now(UTC))
+    base = f"/api/v1/orders/{order.id}"
+    wa = api.app.state.messenger
+
+    andamento = await api.get("/api/v1/orders?em_andamento=true", headers=headers)
+    assert andamento.json()["total"] == 1
+
+    r = await api.post(f"{base}/status", headers=headers, json={"status": "pronto"})
+    assert r.status_code == 409 and "frete" in r.json()["detail"]
+
+    r = await api.post(f"{base}/frete", headers=headers, json={"valor": "15.00"})
+    body = r.json()
+    assert body["mensagem_enviada"] is True
+    assert body["order"]["total_final"] == "115.00"
+    assert "Total a pagar: R$ 115,00" in wa.last and "pix@loja.com" in wa.last
+
+    r = await api.post(f"{base}/pagamento", headers=headers, json={"pago": True})
+    assert r.json()["order"]["pago_em"] is not None and r.json()["mensagem_enviada"] is False
+
+    r = await api.post(f"{base}/status", headers=headers, json={"status": "em_separacao"})
+    assert "está sendo separado" in wa.last
+    r = await api.post(f"{base}/status", headers=headers, json={"status": "pronto"})
+    assert "saiu para entrega" in wa.last
+    r = await api.post(f"{base}/status", headers=headers, json={"status": "concluido"})
+    assert r.json()["order"]["status"] == "concluido"
+    assert "Obrigado pela preferência" in wa.last
+
+    await session.refresh(conversation)
+    assert conversation.estado == ConversationState.COLETANDO
+
+    r = await api.post(f"{base}/status", headers=headers, json={"status": "pronto"})
+    assert r.status_code == 409
+
+    msgs = await api.get(f"/api/v1/conversations/{conversation.id}/messages", headers=headers)
+    assert all(m["enviado_por"] == "atendente" for m in msgs.json())
+
+
+async def test_aviso_fora_da_janela_de_24h(api, session):
+    await _user(session, Role.ATENDENTE, "ana@loja.com")
+    headers = await _login(api, "ana@loja.com")
+    _, order = await _pedido_fechado(session, datetime.now(UTC) - timedelta(days=2))
     r = await api.post(
-        "/webhooks/shopify/orders", content=body, headers={"X-Shopify-Hmac-Sha256": sig}
+        f"/api/v1/orders/{order.id}/status", headers=headers, json={"status": "cancelado"}
     )
-    assert r.json() == {"resultado": "ok"}
-    await session.refresh(order)
-    assert order.status.value == "pago" and order.shopify_order_id == "555"
+    body = r.json()
+    assert body["order"]["status"] == "cancelado"
+    assert body["mensagem_enviada"] is False and "24 h" in body["aviso"]
+    assert api.app.state.messenger.sent == []

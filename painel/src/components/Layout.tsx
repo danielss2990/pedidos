@@ -4,7 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { ROLE_LABEL } from "../format";
-import type { Conversation, Page } from "../types";
+import type { Conversation, Order, Page } from "../types";
 import { Icon } from "./ui";
 
 export default function Layout() {
@@ -19,6 +19,13 @@ export default function Layout() {
       }),
     refetchInterval: 10_000,
     select: (page) => page.items.filter((c) => c.atendente_id === null).length,
+  });
+  // Pedidos fechados pelo bot que ninguém da equipe começou a separar.
+  const novos = useQuery({
+    queryKey: ["orders", "novos"],
+    queryFn: () => api<Page<Order>>("/api/v1/orders", { query: { status: "confirmado", limit: 1 } }),
+    refetchInterval: 10_000,
+    select: (page) => page.total,
   });
 
   return (
@@ -43,6 +50,11 @@ export default function Layout() {
           <NavLink to="/pedidos">
             <Icon name="cart" />
             <span>Pedidos</span>
+            {!!novos.data && (
+              <span className="nav-badge" title="Pedidos novos">
+                {novos.data}
+              </span>
+            )}
           </NavLink>
           <NavLink to="/catalogo">
             <Icon name="box" />

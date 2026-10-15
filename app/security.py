@@ -1,6 +1,3 @@
-import base64
-import hashlib
-import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -42,10 +39,3 @@ def decode_token(token: str, kind: str) -> dict[str, Any]:
     if payload.get("typ") != kind:
         raise jwt.InvalidTokenError("tipo de token inválido")
     return payload
-
-
-def verify_shopify_hmac(secret: str, raw_body: bytes, header: str | None) -> bool:
-    if not secret or not header:
-        return False
-    digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()
-    return hmac.compare_digest(base64.b64encode(digest).decode(), header)

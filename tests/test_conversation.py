@@ -15,6 +15,7 @@ from app.models import (
 from app.services.conversation import (
     MSG_HANDOFF,
     MSG_REMINDER,
+    MSG_REMINDER_CLOSING,
     ConversationEngine,
     send_reminders,
 )
@@ -41,9 +42,7 @@ async def conversation_state(session) -> ConversationState:
     return (await session.scalar(select(Conversation))).estado
 
 
-async def test_fluxo_completo_ate_link_do_carrinho(session, services, seeded):
-    wa = services.messenger
-
+async def _ate_o_resumo(session, services):
     await handle(
         session,
         services,
@@ -55,25 +54,114 @@ async def test_fluxo_completo_ate_link_do_carrinho(session, services, seeded):
             ]
         ),
     )
-    assert wa.bodies()[0].startswith("Olá! Sou o assistente")
-    assert "10 metros de Cabo Flexível 2,5mm² 750V Azul" in wa.last
-    assert "2 unidades de Tomada de Embutir 2P+T 10A Branca" in wa.last
-
     await handle(session, services, incoming(text="é só isso"), extracao(finalizar_pedido=True))
+
+
+async def test_fluxo_completo_com_entrega_e_pix(session, services, seeded):
+    wa = services.messenger
+    await _ate_o_resumo(session, services)
+    assert wa.bodies()[0].startswith("Olá! Sou o assistente")
     resumo, pergunta = wa.sent[-2], wa.sent[-1]
     assert "Total: R$ 38,80" in resumo["body"]  # 10 × 2,10 + 2 × 8,90
     assert pergunta["buttons"] == ["confirmar", "corrigir"]
     assert await conversation_state(session) == ConversationState.AGUARDANDO_CONFIRMACAO
 
-    outcome = await handle(session, services, incoming("button", button_id="confirmar"))
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    assert wa.sent[-1]["buttons"] == ["retirada", "entrega"]
+    assert await conversation_state(session) == ConversationState.FECHANDO
+
+    await handle(session, services, incoming("button", button_id="entrega", text="Entrega"))
+    assert "endereço de entrega" in wa.last
+
+    await handle(session, services, incoming(text="Rua das Flores, 120, Centro"))
+    assert wa.sent[-1]["buttons"] == ["pix", "cartao", "dinheiro"]
+
+    outcome = await handle(session, services, incoming("button", button_id="pix", text="Pix"))
     order = await current_order(session)
-    assert order.status == OrderStatus.CARRINHO_ENVIADO
+    assert order.status == OrderStatus.CONFIRMADO
     assert order.total == Decimal("38.80")
-    assert order.cart_url.startswith("https://loja.test/cart/40003:10,40009:2?")
-    assert f"Pedido nº {order.numero} confirmado" in wa.last
-    assert order.cart_url in wa.last
+    assert order.endereco_entrega == "Rua das Flores, 120, Centro"
+    assert order.forma_pagamento.value == "pix"
+    assert f"Pedido nº {order.numero} confirmado!" in wa.last
+    assert "calcular o frete" in wa.last
+    assert "pix@loja.com" not in wa.last  # a chave vai junto com o frete
     assert outcome.export_order_ids == [str(order.id)]
-    assert await conversation_state(session) == ConversationState.CONCLUIDO
+    assert services.extractor.inputs[-1].texto == "é só isso"  # fechamento não usa o Claude
+    assert await conversation_state(session) == ConversationState.PEDIDO_EM_ANDAMENTO
+
+    # Mensagens seguintes (ex.: comprovante) ficam para a equipe; o bot avisa uma vez.
+    await handle(session, services, incoming(text="oi, alguma novidade?"))
+    await handle(session, services, incoming("image", media_id="comprovante"))
+    avisos = [b for b in wa.bodies() if b.startswith("Recebemos sua mensagem")]
+    assert len(avisos) == 1
+
+
+async def test_retirada_com_respostas_em_texto(session, services, seeded):
+    wa = services.messenger
+    await _ate_o_resumo(session, services)
+    await handle(
+        session, services, incoming(text="pode confirmar"), extracao(confirmar_pedido=True)
+    )
+    await handle(session, services, incoming(text="vou buscar aí"))
+    await handle(session, services, incoming(text="no cartão"))
+    order = await current_order(session)
+    assert order.modalidade.value == "retirada" and order.forma_pagamento.value == "cartao"
+    assert order.status == OrderStatus.CONFIRMADO
+    assert "Retirada na loja: Av. Brasil, 500" in wa.last
+    assert "Pagamento: cartão na retirada" in wa.last
+
+
+async def test_retirada_com_pix_envia_a_chave(session, services, seeded):
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    await handle(session, services, incoming("button", button_id="retirada"))
+    await handle(session, services, incoming("button", button_id="pix"))
+    last = services.messenger.last
+    assert "Pague R$ 38,80 pela chave Pix pix@loja.com (Loja Elétrica Ltda)" in last
+
+
+async def test_entrega_em_dinheiro_pergunta_troco_e_aceita_localizacao(session, services, seeded):
+    wa = services.messenger
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    await handle(session, services, incoming(text="pode entregar"))
+    await handle(
+        session,
+        services,
+        incoming("location", text="Obra Rua A (https://maps.google.com/?q=-23.5,-46.6)"),
+    )
+    await handle(session, services, incoming(text="dinheiro"))
+    assert "troco" in wa.last
+    await handle(session, services, incoming(text="para 100 reais"))
+    order = await current_order(session)
+    assert order.endereco_entrega.startswith("Obra Rua A")
+    assert order.troco_para == "para 100 reais"
+    assert "troco para para 100 reais" in wa.last
+
+
+async def test_resposta_invalida_repete_a_pergunta(session, services, seeded):
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    await handle(session, services, incoming(text="hmm"))
+    assert services.messenger.sent[-1]["body"].startswith("Não entendi. Como prefere receber")
+    assert services.messenger.sent[-1]["buttons"] == ["retirada", "entrega"]
+
+
+async def test_corrigir_durante_o_fechamento_volta_aos_itens(session, services, seeded):
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    await handle(session, services, incoming(text="quero mudar um item"))
+    assert "O que deseja mudar?" in services.messenger.last
+    assert (await current_order(session)).status == OrderStatus.RASCUNHO
+    assert await conversation_state(session) == ConversationState.COLETANDO
+
+
+async def test_fechamento_continua_fora_do_horario(session, services, seeded, clock):
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    clock.now = datetime(2026, 10, 14, 22, 0, tzinfo=UTC)  # 19h em Brasília
+    await handle(session, services, incoming("button", button_id="retirada"))
+    assert services.messenger.sent[-1]["buttons"] == ["pix", "cartao", "dinheiro"]
 
 
 async def test_item_ambiguo_pergunta_e_resolve_pelo_numero(session, services, seeded):
@@ -164,7 +252,7 @@ async def test_corrigir_e_alterar_quantidade(session, services, seeded):
     assert "Total: R$ 44,50" in wa.sent[-2]["body"]
 
 
-async def test_metragem_fracionada_arredonda_para_cima(session, services, seeded):
+async def test_metragem_fracionada_e_mantida(session, services, seeded):
     await handle(
         session,
         services,
@@ -176,7 +264,7 @@ async def test_metragem_fracionada_arredonda_para_cima(session, services, seeded
         ),
     )
     order = await current_order(session)
-    assert order.items[0].quantidade == Decimal("3")
+    assert order.items[0].quantidade == Decimal("2.5")
 
 
 async def test_unidade_diferente_do_catalogo_pergunta(session, services, seeded):
@@ -268,7 +356,7 @@ async def test_confirmar_sem_resumo_nao_gera_link(session, services, seeded):
     assert "Não há pedido aguardando confirmação" in services.messenger.last
     assert services.messenger.sent[-1]["phone"] == PHONE
     order = await current_order(session)
-    assert order.cart_url is None
+    assert order.status == OrderStatus.RASCUNHO
 
 
 async def test_mensagens_do_mesmo_turno_ficam_em_ordem(session, services, seeded):
@@ -283,3 +371,11 @@ async def test_mensagens_do_mesmo_turno_ficam_em_ordem(session, services, seeded
     autores = [m.enviado_por.value for m in rows]
     assert autores == ["cliente", "bot", "bot"]  # mensagem, boas-vindas, "Anotei"
     assert len({m.created_at for m in rows}) == len(rows)
+
+
+async def test_lembrete_durante_o_fechamento(session, services, seeded, clock):
+    await _ate_o_resumo(session, services)
+    await handle(session, services, incoming("button", button_id="confirmar"))
+    clock.now = clock.now + timedelta(minutes=11)
+    assert await send_reminders(session, services) == 1
+    assert services.messenger.last == MSG_REMINDER_CLOSING

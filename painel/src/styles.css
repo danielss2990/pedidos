@@ -179,6 +179,15 @@ input:disabled {
   background: var(--accent);
 }
 
+.btn.danger {
+  color: var(--critical);
+  border-color: var(--critical-soft);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--critical-soft);
+}
+
 .btn.ghost {
   border-color: transparent;
   background: transparent;
@@ -398,6 +407,15 @@ input:disabled {
   color: var(--warning);
 }
 
+.notice.good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.badge.spaced {
+  margin-left: 6px;
+}
+
 .error-box {
   background: var(--critical-soft);
   color: var(--critical);
@@ -576,6 +594,52 @@ tfoot td {
   margin-bottom: 16px;
 }
 
+.order-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+  margin-bottom: 12px;
+}
+
+.frete-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.frete-form label {
+  font-weight: 500;
+}
+
+.frete-form input {
+  width: 110px;
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-closing {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.order-closing dt {
+  color: var(--text-2);
+}
+
+.order-closing dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ---------------------------------------------------------------- login */
 .login {
   min-height: 100vh;
@@ -629,6 +693,11 @@ tfoot td {
   padding: 0 12px 10px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
+}
+
+.tabs.inline {
+  padding: 0;
+  border-bottom: 0;
 }
 
 .tabs button {

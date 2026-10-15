@@ -12,10 +12,12 @@ from app.models import (
     Conversation,
     ConversationState,
     Customer,
+    FormaPagamento,
     ItemStatus,
     Message,
     MessageDirection,
     MessageType,
+    Modalidade,
     Order,
     OrderItem,
     OrderStatus,
@@ -52,9 +54,6 @@ async def seed_demo(session: AsyncSession) -> list[str]:
 
     with CATALOG.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    for i, row in enumerate(rows):
-        # Deixa dois produtos sem variante para mostrar o aviso no painel.
-        row["shopify_variant_id"] = "" if i >= len(rows) - 2 else str(44_000_000 + i)
     await catalog.import_rows(session, rows)
     await session.flush()
     products = {p.sku: p for p in (await session.scalars(select(Product))).all()}
@@ -92,18 +91,16 @@ async def seed_demo(session: AsyncSession) -> list[str]:
             )
         )
 
-    def order(conv, status, items, total=None, cart=None):
+    def order(conv, status, items, total=None, minutes_ago=0, **closing):
         o = Order(
             conversation_id=conv.id,
             customer_id=conv.customer_id,
             status=status,
             total=total,
-            cart_url=cart,
             finalizar_pendente=False,
-            confirmado_em=now
-            if status in (OrderStatus.CARRINHO_ENVIADO, OrderStatus.PAGO)
-            else None,
+            confirmado_em=now - timedelta(minutes=minutes_ago) if closing else None,
             items=[],
+            **closing,
         )
         for pos, (sku, qtd, original, pendente) in enumerate(items, 1):
             p = products.get(sku) if sku else None
@@ -181,8 +178,10 @@ async def seed_demo(session: AsyncSession) -> list[str]:
         ],
     )
 
-    # 3. Pedido concluído com link de carrinho.
-    c3 = await conversation("5531965432109", "Pedro Instalações", ConversationState.CONCLUIDO, 45)
+    # 3. Entrega aguardando a equipe informar o frete.
+    c3 = await conversation(
+        "5531965432109", "Pedro Instalações", ConversationState.PEDIDO_EM_ANDAMENTO, 40
+    )
     message(c3, 50, SentBy.CLIENTE, None, MessageType.IMAGEM)
     message(
         c3,
@@ -201,36 +200,69 @@ async def seed_demo(session: AsyncSession) -> list[str]:
         "   4 unidades × R$ 7,50 = R$ 30,00\n\n*Total: R$ 175,00*",
     )
     message(c3, 45, SentBy.CLIENTE, "Confirmar", MessageType.BOTAO)
+    message(c3, 44, SentBy.BOT, "Como prefere receber o pedido?", MessageType.BOTAO)
+    message(c3, 43, SentBy.CLIENTE, "Entrega", MessageType.BOTAO)
+    message(c3, 42, SentBy.BOT, "Qual o endereço de entrega?")
+    message(c3, 41, SentBy.CLIENTE, "Rua das Flores, 120, Savassi, Belo Horizonte")
+    message(c3, 40.5, SentBy.BOT, "Qual a forma de pagamento?", MessageType.BOTAO)
+    message(c3, 40.2, SentBy.CLIENTE, "Pix", MessageType.BOTAO)
     message(
         c3,
-        44,
+        40,
         SentBy.BOT,
-        "Pedido confirmado! Finalize a compra por este link:\n"
-        "https://loja.example/cart/44000001:100,44000010:4",
+        "Pedido nº 1002 confirmado!\n\nItens: R$ 175,00\n"
+        "Entrega em: Rua das Flores, 120, Savassi, Belo Horizonte\nPagamento: Pix\n\n"
+        "Nossa equipe vai calcular o frete e enviar o valor final por aqui.",
     )
     order(
         c3,
-        OrderStatus.CARRINHO_ENVIADO,
+        OrderStatus.CONFIRMADO,
         [
             ("CAB-FLX-15-PT", "100", "100 metros de fio 1,5 preto", None),
             ("INT-SIM-10-BR", "4", "4 interruptores", None),
         ],
         Decimal("175.00"),
-        "https://loja.example/cart/44000001:100,44000010:4",
+        minutes_ago=40,
+        modalidade=Modalidade.ENTREGA,
+        endereco_entrega="Rua das Flores, 120, Savassi, Belo Horizonte",
+        forma_pagamento=FormaPagamento.PIX,
     )
 
-    # 4. Pedido pago, de ontem.
-    c4 = await conversation("5541954321098", "Marcos", ConversationState.CONCLUIDO, 60 * 26)
-    message(c4, 60 * 26, SentBy.CLIENTE, "2 fitas isolantes e 1 passa-fio, é só isso")
+    # 4. Retirada em separação, paga em dinheiro na loja.
+    c4 = await conversation("5541954321098", "Marcos", ConversationState.PEDIDO_EM_ANDAMENTO, 90)
+    message(c4, 95, SentBy.CLIENTE, "2 fitas isolantes e 1 passa-fio, é só isso")
+    message(c4, 90, SentBy.CLIENTE, "Retirar na loja", MessageType.BOTAO)
+    message(c4, 89.5, SentBy.CLIENTE, "Dinheiro", MessageType.BOTAO)
     order(
         c4,
-        OrderStatus.PAGO,
+        OrderStatus.EM_SEPARACAO,
         [
             ("FIT-ISO-20", "2", "2 fitas isolantes", None),
             ("FIT-PAS-20", "1", "1 passa-fio", None),
         ],
         Decimal("59.70"),
-        "https://loja.example/cart/44000016:2,44000017:1",
+        minutes_ago=90,
+        modalidade=Modalidade.RETIRADA,
+        forma_pagamento=FormaPagamento.DINHEIRO,
+    )
+
+    # 5. Pedido de ontem, concluído e pago.
+    c5 = await conversation(
+        "5511943210987", "Construtora Lima", ConversationState.COLETANDO, 60 * 26
+    )
+    message(c5, 60 * 26, SentBy.CLIENTE, "5 disjuntores de 20 e 3 de 10")
+    order(
+        c5,
+        OrderStatus.CONCLUIDO,
+        [
+            ("DIS-1P-20", "5", "5 disjuntores de 20", None),
+            ("DIS-1P-10", "3", "3 de 10", None),
+        ],
+        Decimal("119.20"),
+        minutes_ago=60 * 26,
+        modalidade=Modalidade.RETIRADA,
+        forma_pagamento=FormaPagamento.CARTAO,
+        pago_em=now - timedelta(hours=24),
     )
 
     await session.flush()

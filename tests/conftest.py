@@ -3,8 +3,9 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres@localhost:5432/pedidos_test")
 os.environ.setdefault("WHATSAPP_APP_SECRET", "segredo-meta")
 os.environ.setdefault("WHATSAPP_VERIFY_TOKEN", "token-verificacao")
-os.environ.setdefault("SHOPIFY_WEBHOOK_SECRET", "segredo-shopify")
-os.environ.setdefault("SHOPIFY_STORE_DOMAIN", "loja.test")
+os.environ.setdefault("PIX_CHAVE", "pix@loja.com")
+os.environ.setdefault("PIX_TITULAR", "Loja Elétrica Ltda")
+os.environ.setdefault("LOJA_ENDERECO", "Av. Brasil, 500")
 os.environ.setdefault("SECRET_KEY", "chave-de-teste-com-tamanho-suficiente-para-hs256")
 
 import csv  # noqa: E402
@@ -22,7 +23,6 @@ from app.config import get_settings  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
 from app.models import Base  # noqa: E402
 from app.services import catalog  # noqa: E402
-from app.services.cart import ShopifyCartBuilder  # noqa: E402
 from app.services.conversation import Services  # noqa: E402
 from app.services.extraction import (  # noqa: E402
     Atributo,
@@ -66,8 +66,6 @@ async def session() -> AsyncIterator[AsyncSession]:
 async def seeded(session: AsyncSession) -> None:
     with CATALOG_CSV.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    for i, row in enumerate(rows, 1):
-        row["shopify_variant_id"] = str(40000 + i)
     await catalog.import_rows(session, rows)
     await session.commit()
 
@@ -145,7 +143,6 @@ def services(clock: Clock) -> Services:
         messenger=FakeMessenger(),
         extractor=FakeExtractor(),
         transcriber=FakeTranscriber(),
-        cart=ShopifyCartBuilder("loja.test"),
         media=FakeMedia(),
         now=clock,
     )

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ORDER_STATUS_LABEL, STATE_LABEL } from "../format";
-import type { ConversationState, OrderStatus } from "../types";
+import { STATE_LABEL, orderStatusLabel } from "../format";
+import type { ConversationState, Modalidade, OrderStatus } from "../types";
 
 const ICONS: Record<string, string> = {
   bolt: "M13 2 4 14h7l-1 8 9-12h-7z",
@@ -44,16 +44,19 @@ export function Icon({ name, size = 18 }: { name: keyof typeof ICONS | string; s
 const STATE_TONE: Record<ConversationState, string> = {
   coletando: "info",
   aguardando_confirmacao: "warning",
+  fechando: "warning",
+  pedido_em_andamento: "good",
   atendimento_humano: "critical",
-  concluido: "neutral",
 };
 
 const ORDER_TONE: Record<OrderStatus, string> = {
   rascunho: "neutral",
   aguardando_confirmacao: "warning",
-  confirmado: "info",
-  carrinho_enviado: "info",
-  pago: "good",
+  fechando: "warning",
+  confirmado: "critical",
+  em_separacao: "info",
+  pronto: "info",
+  concluido: "good",
   cancelado: "neutral",
 };
 
@@ -61,8 +64,16 @@ export function StateBadge({ state }: { state: ConversationState }) {
   return <span className={`badge ${STATE_TONE[state]}`}>{STATE_LABEL[state]}</span>;
 }
 
-export function OrderBadge({ status }: { status: OrderStatus }) {
-  return <span className={`badge ${ORDER_TONE[status]}`}>{ORDER_STATUS_LABEL[status]}</span>;
+export function OrderBadge({
+  status,
+  modalidade = null,
+}: {
+  status: OrderStatus;
+  modalidade?: Modalidade | null;
+}) {
+  return (
+    <span className={`badge ${ORDER_TONE[status]}`}>{orderStatusLabel(status, modalidade)}</span>
+  );
 }
 
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {

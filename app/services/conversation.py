@@ -1,6 +1,8 @@
-"""Motor da conversa no WhatsApp: estados, dúvidas, resumo, confirmação e carrinho."""
+"""Motor da conversa no WhatsApp: estados, dúvidas, resumo, confirmação e fechamento."""
 
 import logging
+import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -28,7 +30,6 @@ from app.models import (
     SentBy,
 )
 from app.services.business_hours import load_schedule
-from app.services.cart import CartBuilder, CartError, variant_quantity
 from app.services.catalog import Catalog
 from app.services.extraction import (
     Extracao,
@@ -37,8 +38,15 @@ from app.services.extraction import (
     Extractor,
     ItemExtraido,
 )
+from app.services.fulfillment import (
+    closing_message,
+    next_closing_step,
+    parse_modalidade,
+    parse_pagamento,
+    parse_troco,
+)
 from app.services.media import MediaStore
-from app.services.text import brl, qty
+from app.services.text import brl, normalize, qty
 from app.services.transcription import Transcriber, TranscriptionError
 from app.services.whatsapp import Button, IncomingMessage, Messenger
 
@@ -48,6 +56,11 @@ BTN_CONFIRMAR = "confirmar"
 BTN_CORRIGIR = "corrigir"
 MAX_OPTIONS = 3
 OFF_HOURS_NOTICE_INTERVAL = timedelta(hours=12)
+IN_PROGRESS_NOTICE_INTERVAL = timedelta(hours=12)
+
+# Durante o fechamento o bot entende estes pedidos sem chamar o Claude.
+WANTS_HUMAN = re.compile(r"\b(atendente|humano|pessoa|falar com alguem)\b")
+WANTS_CORRECTION = re.compile(r"\b(corrigir|alterar|mudar|trocar item|tirar)\b")
 
 # Unidades que podem ser tratadas como a mesma coisa ao casar pedido e catálogo.
 UNIT_GROUPS = [{"unidades", "pecas", "pacotes"}, {"metros"}, {"rolos"}, {"caixas"}, {"barras"}]
@@ -78,6 +91,19 @@ MSG_CORRECTION = (
 )
 MSG_NOTHING_TO_CONFIRM = "Não há pedido aguardando confirmação. Quais materiais você precisa?"
 MSG_REMINDER = "Ainda está por aí? Posso fechar o pedido? Se faltar algo, é só mandar."
+MSG_REMINDER_CLOSING = "Ainda está por aí? Falta pouco para fechar seu pedido."
+MSG_IN_PROGRESS = (
+    "Recebemos sua mensagem. Seu pedido já está com a nossa equipe, "
+    "que responde por aqui em instantes."
+)
+MSG_ASK_MODALIDADE = "Como prefere receber o pedido?"
+MSG_ASK_ENDERECO = (
+    "Qual o endereço de entrega? Informe rua, número, bairro e complemento, "
+    "ou envie sua localização pelo WhatsApp."
+)
+MSG_ASK_PAGAMENTO = "Qual a forma de pagamento?"
+MSG_ASK_TROCO = "Vai precisar de troco? Se sim, para quanto?"
+MSG_REPEAT = "Não entendi. "
 
 
 @dataclass
@@ -86,7 +112,6 @@ class Services:
     messenger: Messenger
     extractor: Extractor
     transcriber: Transcriber
-    cart: CartBuilder
     media: MediaStore
     now: Callable[[], datetime]
 
@@ -108,6 +133,14 @@ def item_line(numero: int, item: OrderItem) -> str:
     if item.status == ItemStatus.PENDENTE_DUVIDA:
         line += " (aguardando resposta)"
     return line
+
+
+def normalize_quantity(value: float | Decimal, unidade: str) -> Decimal:
+    """Metros aceitam fração (2,5 m); o resto é vendido inteiro e arredonda para cima."""
+    quantidade = Decimal(str(value))
+    if unidade == "metros":
+        return quantidade.quantize(Decimal("0.01"))
+    return Decimal(max(1, math.ceil(quantidade)))
 
 
 def subtotal(item: OrderItem) -> Decimal:
@@ -164,16 +197,23 @@ class ConversationEngine:
         if conversation.estado == ConversationState.ATENDIMENTO_HUMANO:
             return self.outcome
 
-        schedule = await load_schedule(self.session)
-        if not schedule.is_open(now.astimezone(self.settings.tz)):
-            last = conversation.aviso_fora_horario_em
-            if last is None or now - last > OFF_HOURS_NOTICE_INTERVAL:
-                await self._send(MSG_OFF_HOURS.format(horario=schedule.describe()))
-                conversation.aviso_fora_horario_em = now
+        if conversation.estado == ConversationState.PEDIDO_EM_ANDAMENTO:
+            last = conversation.aviso_pedido_em_andamento_em
+            if last is None or now - last > IN_PROGRESS_NOTICE_INTERVAL:
+                await self._send(MSG_IN_PROGRESS)
+                conversation.aviso_pedido_em_andamento_em = now
             return self.outcome
 
-        if conversation.estado == ConversationState.CONCLUIDO:
-            conversation.estado = ConversationState.COLETANDO
+        # Fora do horário o bot não começa pedidos; quem já está confirmando ou fechando
+        # um pedido pode terminar.
+        if conversation.estado == ConversationState.COLETANDO:
+            schedule = await load_schedule(self.session)
+            if not schedule.is_open(now.astimezone(self.settings.tz)):
+                last = conversation.aviso_fora_horario_em
+                if last is None or now - last > OFF_HOURS_NOTICE_INTERVAL:
+                    await self._send(MSG_OFF_HOURS.format(horario=schedule.describe()))
+                    conversation.aviso_fora_horario_em = now
+                return self.outcome
 
         if msg.kind == "other":
             await self._send(MSG_UNSUPPORTED)
@@ -183,18 +223,12 @@ class ConversationEngine:
 
         if msg.kind == "button" and msg.button_id in (BTN_CONFIRMAR, BTN_CORRIGIR):
             if msg.button_id == BTN_CONFIRMAR:
-                await self._confirm(order)
+                await self._start_closing(order)
             else:
                 await self._ask_correction(order)
             return self.outcome
 
-        pending = self._first_pending(order)
         texto = (msg.text or "").strip()
-        if pending and pending.opcoes and texto.isdigit():
-            if await self._resolve_option(pending, int(texto)):
-                await self._after_change(order, changed=True, finalizar=False)
-                return self.outcome
-
         if msg.kind == "audio":
             try:
                 texto = await self.s.transcriber.transcribe(media or b"", stored.media_mime or "")
@@ -206,6 +240,16 @@ class ConversationEngine:
             self.session.add(
                 AiRun(message_id=stored.id, provedor="openai", modelo=self.settings.whisper_model)
             )
+
+        if conversation.estado == ConversationState.FECHANDO:
+            await self._closing_step(order, msg, texto)
+            return self.outcome
+
+        pending = self._first_pending(order)
+        if pending and pending.opcoes and texto.isdigit():
+            if await self._resolve_option(pending, int(texto)):
+                await self._after_change(order, changed=True, finalizar=False)
+                return self.outcome
 
         data = ExtractionInput(
             estado=conversation.estado.value,
@@ -268,7 +312,7 @@ class ConversationEngine:
                 order.items.remove(item)
                 changed = True
             elif alt.nova_quantidade and alt.nova_quantidade > 0:
-                item.quantidade = Decimal(variant_quantity(Decimal(str(alt.nova_quantidade))))
+                item.quantidade = normalize_quantity(alt.nova_quantidade, item.unidade)
                 changed = True
 
         for novo in ex.itens_novos:
@@ -286,7 +330,7 @@ class ConversationEngine:
             self.conversation.duvidas_sem_solucao = 0
 
         if ex.confirmar_pedido and not changed:
-            await self._confirm(order)
+            await self._start_closing(order)
             return
         if ex.corrigir_pedido and not changed:
             await self._ask_correction(order)
@@ -341,7 +385,7 @@ class ConversationEngine:
 
     async def _add_item(self, order: Order, novo: ItemExtraido) -> OrderItem:
         match = await self.catalog.match(novo)
-        quantidade = Decimal(variant_quantity(Decimal(str(novo.quantidade))))
+        quantidade = normalize_quantity(novo.quantidade, novo.unidade)
         item = OrderItem(
             posicao=max((i.posicao for i in order.items), default=0) + 1,
             descricao_original=novo.descricao_original,
@@ -355,6 +399,7 @@ class ConversationEngine:
         if product is not None and not novo.duvida:
             if _same_unit(novo.unidade, product.unidade_venda):
                 self._set_product(item, product)
+                item.quantidade = normalize_quantity(novo.quantidade, product.unidade_venda)
             else:
                 item.status = ItemStatus.PENDENTE_DUVIDA
                 item.product = None
@@ -432,7 +477,7 @@ class ConversationEngine:
                 f"   {qty(item.quantidade)} {item.unidade} × {unit_price} = {brl(sub)}"
             )
         lines.append(f"\n*Total: {brl(total)}*")
-        lines.append("Frete e pagamento são calculados no checkout.")
+        lines.append("Entrega ou retirada e pagamento a seguir.")
         order.total = total
         order.status = OrderStatus.AGUARDANDO_CONFIRMACAO
         order.finalizar_pendente = False
@@ -443,33 +488,87 @@ class ConversationEngine:
             buttons=[Button(BTN_CONFIRMAR, "Confirmar"), Button(BTN_CORRIGIR, "Corrigir")],
         )
 
-    async def _confirm(self, order: Order) -> None:
+    async def _start_closing(self, order: Order) -> None:
         if (
             order.status != OrderStatus.AGUARDANDO_CONFIRMACAO
             or self.conversation.estado != ConversationState.AGUARDANDO_CONFIRMACAO
         ):
             await self._send(MSG_NOTHING_TO_CONFIRM)
             return
-        order.status = OrderStatus.CONFIRMADO
-        order.confirmado_em = self.s.now()
-        try:
-            order.cart_url = self.s.cart.build_url(order, self.customer.telefone_e164)
-        except CartError as exc:
-            log.error("pedido %s sem link de carrinho: %s", order.numero, exc)
-            self.outcome.export_order_ids.append(str(order.id))
+        order.status = OrderStatus.FECHANDO
+        self.conversation.estado = ConversationState.FECHANDO
+        await self._next_closing_question(order)
+
+    async def _closing_step(self, order: Order, msg: IncomingMessage, texto: str) -> None:
+        t = normalize(texto)
+        if WANTS_HUMAN.search(t):
             await self._handoff()
             return
-        order.status = OrderStatus.CARRINHO_ENVIADO
-        self.conversation.estado = ConversationState.CONCLUIDO
+        if WANTS_CORRECTION.search(t):
+            await self._ask_correction(order)
+            return
+
+        step = next_closing_step(order)
+        answered = False
+        if step == "modalidade":
+            modalidade = parse_modalidade(msg.button_id, texto)
+            if modalidade is not None:
+                order.modalidade = modalidade
+                answered = True
+        elif step == "endereco":
+            if msg.kind == "location" or (len(texto) >= 8 and not texto.isdigit()):
+                order.endereco_entrega = texto
+                answered = True
+        elif step == "pagamento":
+            forma = parse_pagamento(msg.button_id, texto)
+            if forma is not None:
+                order.forma_pagamento = forma
+                answered = True
+        elif step == "troco":
+            order.troco_para = parse_troco(texto)
+            answered = True
+
+        if not answered:
+            await self._next_closing_question(order, repeat=True)
+        elif next_closing_step(order) is None:
+            await self._finish_closing(order)
+        else:
+            await self._next_closing_question(order)
+
+    async def _next_closing_question(self, order: Order, repeat: bool = False) -> None:
+        prefix = MSG_REPEAT if repeat else ""
+        step = next_closing_step(order)
+        if step is None:
+            await self._finish_closing(order)
+        elif step == "modalidade":
+            await self._send(
+                prefix + MSG_ASK_MODALIDADE,
+                buttons=[Button("retirada", "Retirar na loja"), Button("entrega", "Entrega")],
+            )
+        elif step == "endereco":
+            await self._send(prefix + MSG_ASK_ENDERECO)
+        elif step == "pagamento":
+            await self._send(
+                prefix + MSG_ASK_PAGAMENTO,
+                buttons=[
+                    Button("pix", "Pix"),
+                    Button("cartao", "Cartão"),
+                    Button("dinheiro", "Dinheiro"),
+                ],
+            )
+        elif step == "troco":
+            await self._send(prefix + MSG_ASK_TROCO)
+
+    async def _finish_closing(self, order: Order) -> None:
+        order.status = OrderStatus.CONFIRMADO
+        order.confirmado_em = self.s.now()
+        self.conversation.estado = ConversationState.PEDIDO_EM_ANDAMENTO
         self.outcome.export_order_ids.append(str(order.id))
-        await self._send(
-            f"Pedido nº {order.numero} confirmado! Finalize a compra por este link:\n"
-            f"{order.cart_url}\n\nObrigado pela preferência!"
-        )
+        await self._send(closing_message(order, self.settings))
 
     async def _ask_correction(self, order: Order) -> None:
         self.conversation.estado = ConversationState.COLETANDO
-        if order.status == OrderStatus.AGUARDANDO_CONFIRMACAO:
+        if order.status in (OrderStatus.AGUARDANDO_CONFIRMACAO, OrderStatus.FECHANDO):
             order.status = OrderStatus.RASCUNHO
         itens = "\n".join(item_line(i, it) for i, it in enumerate(order.items, 1))
         await self._send(MSG_CORRECTION.format(itens=itens or "(pedido vazio)"))
@@ -570,6 +669,7 @@ def _message_type(kind: str) -> MessageType:
         "audio": MessageType.AUDIO,
         "image": MessageType.IMAGEM,
         "button": MessageType.BOTAO,
+        "location": MessageType.LOCALIZACAO,
     }.get(kind, MessageType.OUTRO)
 
 
@@ -593,7 +693,7 @@ async def send_reminders(session: AsyncSession, services: Services) -> int:
         await session.scalars(
             select(Conversation)
             .where(
-                Conversation.estado == ConversationState.COLETANDO,
+                Conversation.estado.in_([ConversationState.COLETANDO, ConversationState.FECHANDO]),
                 Conversation.lembrete_enviado_em.is_(None),
                 Conversation.ultimo_contato_cliente_em < limit,
             )
@@ -602,9 +702,13 @@ async def send_reminders(session: AsyncSession, services: Services) -> int:
     ).all()
     sent = 0
     for conversation in conversations:
+        closing = conversation.estado == ConversationState.FECHANDO
         order = await session.scalar(
             select(Order)
-            .where(Order.conversation_id == conversation.id, Order.status == OrderStatus.RASCUNHO)
+            .where(
+                Order.conversation_id == conversation.id,
+                Order.status == (OrderStatus.FECHANDO if closing else OrderStatus.RASCUNHO),
+            )
             .options(selectinload(Order.items))
         )
         if order is None or not order.items:
@@ -614,14 +718,15 @@ async def send_reminders(session: AsyncSession, services: Services) -> int:
         phone = conversation.customer.telefone_e164
         if phone is None:
             continue
-        wa_id = await services.messenger.send_text(phone, MSG_REMINDER)
+        text = MSG_REMINDER_CLOSING if closing else MSG_REMINDER
+        wa_id = await services.messenger.send_text(phone, text)
         session.add(
             Message(
                 conversation_id=conversation.id,
                 wa_message_id=wa_id,
                 direcao=MessageDirection.SAIDA,
                 tipo=MessageType.TEXTO,
-                conteudo=MSG_REMINDER,
+                conteudo=text,
                 enviado_por=SentBy.BOT,
             )
         )

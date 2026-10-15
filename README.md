@@ -1,8 +1,9 @@
 # Central de Pedidos Elétricos — backend
 
 API e worker que recebem pedidos de materiais elétricos pelo WhatsApp (texto, áudio ou foto),
-transformam o pedido em itens do catálogo com o Claude, confirmam com o cliente e devolvem um
-link de carrinho Shopify, registrando cada pedido no Google Sheets.
+transformam o pedido em itens do catálogo com o Claude, confirmam com o cliente e fecham o pedido
+pelo próprio WhatsApp (retirada ou entrega e forma de pagamento), registrando cada pedido no
+Google Sheets. Não há e-commerce: a equipe separa, cobra e entrega acompanhando pelo painel.
 
 Especificação completa: documento "Especificação do Backend — Central de Pedidos Elétricos via IA".
 
@@ -18,10 +19,18 @@ Especificação completa: documento "Especificação do Backend — Central de P
    - cada item é casado com o catálogo por similaridade (`pg_trgm`) e atributos (bitola,
      corrente, cor...). Se houver dúvida, o bot pergunta com até 3 opções numeradas;
    - no "é só isso", o bot mostra o resumo com preços e total e os botões Confirmar/Corrigir;
-   - na confirmação, gera o link `https://loja/cart/variante:qtd,...` e agenda a exportação
-     para a planilha.
-3. A equipe usa o painel web (`painel/`, React) sobre a API `/api/v1`: caixa de entrada,
-   assumir/devolver conversa, responder, pedidos, catálogo, horário comercial e usuários.
+   - ao confirmar, o bot fecha o pedido sem chamar o Claude: pergunta retirada ou entrega
+     (endereço digitado ou localização do WhatsApp), forma de pagamento (Pix, cartão ou
+     dinheiro) e, se for dinheiro na entrega, o troco. Na retirada com Pix já envia a chave;
+   - o pedido fica "Novo" no painel e vai para a planilha. Enquanto ele está com a equipe, o bot
+     só avisa o cliente que a mensagem foi recebida (no máximo uma vez a cada 12 h).
+3. A equipe usa o painel web (`painel/`, React) sobre a API `/api/v1`:
+   - **Pedidos › Em andamento**: informar o frete (o cliente recebe o total e a chave Pix),
+     marcar como pago e avançar: em separação → pronto para retirada / saiu para entrega →
+     concluído. Cada etapa avisa o cliente no WhatsApp (dentro da janela de 24 h da Meta);
+   - **Conversas**: fila de atendimento, assumir/devolver ao bot, responder, ver áudios e fotos
+     (ex.: comprovantes de Pix);
+   - catálogo, horário comercial e usuários.
 
 Preços e SKUs vêm sempre do banco; o modelo nunca informa preço.
 
@@ -39,7 +48,7 @@ app/
     catalog.py         importação da planilha e casamento item → produto
     whatsapp.py        cliente da Cloud API e leitura do webhook
     transcription.py   Whisper
-    cart.py            link de carrinho Shopify
+    fulfillment.py     fechamento (entrega/pagamento) e ações da equipe sobre o pedido
     sheets.py          exportação de pedidos e leitura do catálogo no Google Sheets
     business_hours.py  horário comercial e feriados
     privacy.py         retenção de 1 ano (LGPD)
@@ -112,7 +121,6 @@ cd painel && npm run typecheck && npm test
 | categoria | cabos |
 | unidade_venda | metros, unidades, rolos, caixas... |
 | preco | 2,10 |
-| shopify_variant_id | 44112233445566 |
 | atributos | bitola_mm2=2.5; cor=Azul; tensao_v=750 |
 | sinonimos | fio 2.5; fio de dois e meio; fio de duas metade |
 | ativo | sim / não |
@@ -135,7 +143,9 @@ O serviço `caddy` é construído a partir de `painel/Dockerfile`: compila o pai
 CORS). O Caddy emite o certificado HTTPS para `DOMAIN` automaticamente. Webhooks a cadastrar:
 
 - Meta: `https://DOMAIN/webhooks/whatsapp` (campo `messages`)
-- Shopify: `https://DOMAIN/webhooks/shopify/orders` (evento `orders/create`)
+
+Configure no `.env` o endereço da loja e a chave Pix (`LOJA_ENDERECO`, `PIX_CHAVE`,
+`PIX_TITULAR`); eles aparecem nas mensagens de fechamento.
 
 ## Ainda não implementado
 
@@ -147,4 +157,5 @@ CORS). O Caddy emite o certificado HTTPS para `DOMAIN` automaticamente. Webhooks
 - Armazenamento de mídia no Cloudflare R2 (hoje vai para o volume `media`) e backup automático.
 - Busca semântica por embeddings; o casamento atual usa `pg_trgm` + atributos e deve ser
   calibrado com o catálogo real (`MATCH_CONFIDENCE_THRESHOLD`).
+- Confirmação automática de Pix (hoje a equipe confere o comprovante e marca como pago).
 - Integração com ERP.
