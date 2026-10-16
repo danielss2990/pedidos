@@ -1,12 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
-import { api } from "../api";
+import { api, download } from "../api";
 import { useAuth } from "../auth";
 import { ErrorBox, Empty, Field, Icon, Modal } from "../components/ui";
 import { brl } from "../format";
 import type { Page, Product } from "../types";
+
+interface ImportResult {
+  criados: number;
+  atualizados: number;
+  ignorados: number;
+}
 
 const UNITS = ["unidades", "metros", "rolos", "caixas", "pecas", "pacotes", "barras"];
 
@@ -51,10 +57,17 @@ export default function CatalogPage() {
         query: { q, ativo: showInactive ? undefined : true, limit: 200 },
       }),
   });
-  const sync = useMutation({
-    mutationFn: () => api("/api/v1/products/sync", { method: "POST" }),
-    onSuccess: () =>
-      setTimeout(() => void queryClient.invalidateQueries({ queryKey: ["products"] }), 5_000),
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importFile = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("arquivo", file);
+      return api<ImportResult>("/api/v1/products/import", { method: "POST", form });
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["products"] }),
+  });
+  const exportFile = useMutation({
+    mutationFn: () => download("/api/v1/products/export", { formato: "xlsx" }, "catalogo.xlsx"),
   });
   const items = products.data?.items ?? [];
 
@@ -82,8 +95,32 @@ export default function CatalogPage() {
         </label>
         {isAdmin && (
           <div className="actions">
-            <button className="btn" onClick={() => sync.mutate()} disabled={sync.isPending}>
-              <Icon name="refresh" /> {sync.isSuccess ? "Sincronização agendada" : "Sincronizar planilha"}
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".csv,.xlsx"
+              hidden
+              aria-label="Arquivo do catálogo"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) importFile.mutate(file);
+                e.target.value = "";
+              }}
+            />
+            <button
+              className="btn"
+              onClick={() => exportFile.mutate()}
+              disabled={exportFile.isPending}
+              title="Baixa o catálogo em XLSX; o mesmo arquivo serve de modelo para importar"
+            >
+              Exportar planilha
+            </button>
+            <button
+              className="btn"
+              onClick={() => fileInput.current?.click()}
+              disabled={importFile.isPending}
+            >
+              <Icon name="refresh" /> {importFile.isPending ? "Importando…" : "Importar CSV/XLSX"}
             </button>
             <button className="btn primary" onClick={() => setEditing("new")}>
               <Icon name="plus" /> Novo produto
@@ -91,7 +128,16 @@ export default function CatalogPage() {
           </div>
         )}
       </header>
-      <ErrorBox error={products.error || sync.error} />
+      <ErrorBox error={products.error || importFile.error || exportFile.error} />
+      {importFile.data && (
+        <div className="notice good" role="status">
+          Importação concluída: {importFile.data.criados} criado(s), {importFile.data.atualizados}{" "}
+          atualizado(s)
+          {importFile.data.ignorados > 0 &&
+            `, ${importFile.data.ignorados} linha(s) ignorada(s) por falta de SKU, nome ou preço`}
+          .
+        </div>
+      )}
       <div className="table-wrap">
         <table>
           <thead>

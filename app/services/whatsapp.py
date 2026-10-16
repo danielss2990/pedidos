@@ -114,7 +114,7 @@ def _parse_message(raw: dict[str, Any], names: dict[str, str | None]) -> Incomin
         loc = raw["location"]
         lat, lng = loc.get("latitude"), loc.get("longitude")
         label = ", ".join(p for p in (loc.get("name"), loc.get("address")) if p)
-        link = f"https://maps.google.com/?q={lat},{lng}"
+        link = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lng}#map=18/{lat}/{lng}"
         return IncomingMessage(**base, kind="location", text=f"{label} ({link})" if label else link)
     if kind == "button":
         button = raw["button"]

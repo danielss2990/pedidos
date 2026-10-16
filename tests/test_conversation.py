@@ -85,8 +85,8 @@ async def test_fluxo_completo_com_entrega_e_pix(session, services, seeded):
     assert f"Pedido nº {order.numero} confirmado!" in wa.last
     assert "calcular o frete" in wa.last
     assert "pix@loja.com" not in wa.last  # a chave vai junto com o frete
-    assert outcome.export_order_ids == [str(order.id)]
-    assert services.extractor.inputs[-1].texto == "é só isso"  # fechamento não usa o Claude
+    assert outcome.notify_panel
+    assert services.extractor.inputs[-1].texto == "é só isso"  # fechamento não usa a IA
     assert await conversation_state(session) == ConversationState.PEDIDO_EM_ANDAMENTO
 
     # Mensagens seguintes (ex.: comprovante) ficam para a equipe; o bot avisa uma vez.
@@ -128,7 +128,9 @@ async def test_entrega_em_dinheiro_pergunta_troco_e_aceita_localizacao(session, 
     await handle(
         session,
         services,
-        incoming("location", text="Obra Rua A (https://maps.google.com/?q=-23.5,-46.6)"),
+        incoming(
+            "location", text="Obra Rua A (https://www.openstreetmap.org/?mlat=-23.5&mlon=-46.6)"
+        ),
     )
     await handle(session, services, incoming(text="dinheiro"))
     assert "troco" in wa.last
@@ -175,7 +177,7 @@ async def test_item_ambiguo_pergunta_e_resolve_pelo_numero(session, services, se
     assert "qual destes" in wa.last
     assert "1) Minidisjuntor DIN 1P 10A Curva C" in wa.last
 
-    # A resposta numérica é resolvida sem chamar o Claude.
+    # A resposta numérica é resolvida sem chamar a IA.
     await handle(session, services, incoming(text="2"))
     order = await current_order(session)
     assert order.items[0].status == ItemStatus.OK
@@ -291,7 +293,7 @@ async def test_audio_e_transcrito_antes_da_extracao(session, services, seeded):
     assert msg.transcricao == "quero uma fita isolante"
 
 
-async def test_foto_vai_como_imagem_para_o_claude(session, services, seeded):
+async def test_foto_vai_como_imagem_para_a_ia(session, services, seeded):
     services.messenger.media["img1"] = (b"\xff\xd8jpeg", "image/jpeg")
     await handle(
         session,
@@ -301,7 +303,9 @@ async def test_foto_vai_como_imagem_para_o_claude(session, services, seeded):
     )
     sent = services.extractor.inputs[0]
     assert sent.tipo == "imagem" and sent.imagem == b"\xff\xd8jpeg"
-    assert "foto" in services.messenger.last
+    bodies = services.messenger.bodies()
+    assert "Estou lendo a lista" in bodies[-2]  # aviso antes do modelo de visão (lento em CPU)
+    assert "foto" in bodies[-1]
 
 
 async def test_fora_do_horario_avisa_uma_vez(session, services, seeded, clock):

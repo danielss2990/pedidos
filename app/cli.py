@@ -1,14 +1,13 @@
 """Comandos de administração.
 
 python -m app.cli create-admin --nome "Fulano" --email fulano@loja.com
-python -m app.cli import-catalog data/catalogo_exemplo.csv
+python -m app.cli import-catalog data/catalogo_exemplo.csv   # .csv ou .xlsx
 python -m app.cli seed-hours
 python -m app.cli seed-demo      # dados fictícios para testar o painel
 """
 
 import argparse
 import asyncio
-import csv
 import getpass
 
 from sqlalchemy import func, select
@@ -18,6 +17,7 @@ from app.models import BusinessHours, Role, User
 from app.security import hash_password
 from app.services import catalog
 from app.services.business_hours import DEFAULT_HOURS
+from app.services.export import read_table
 
 
 async def create_admin(nome: str, email: str, senha: str) -> None:
@@ -39,8 +39,8 @@ async def create_admin(nome: str, email: str, senha: str) -> None:
 
 
 async def import_catalog(path: str) -> None:
-    with open(path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    with open(path, "rb") as f:
+        rows = read_table(path, f.read())
     async with SessionLocal() as session:
         stats = await catalog.import_rows(session, rows)
         await session.commit()

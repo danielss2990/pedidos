@@ -24,10 +24,10 @@ async def put_business_hours(
     data: list[BusinessHoursItem], admin: AdminUser, session: SessionDep
 ) -> list[BusinessHoursItem]:
     if len({d.dia_semana for d in data}) != len(data):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Dia da semana repetido")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Dia da semana repetido")
     if any(d.abre >= d.fecha for d in data):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "Horário de abertura após o fechamento"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Horário de abertura após o fechamento"
         )
     await session.execute(delete(BusinessHours))
     for d in data:

@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import io
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -7,6 +8,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from openpyxl import load_workbook
 
 from app.main import create_app
 from app.models import (
@@ -19,6 +21,7 @@ from app.models import (
     MessageType,
     Modalidade,
     Order,
+    OrderItem,
     OrderStatus,
     Role,
     SentBy,
@@ -226,8 +229,38 @@ async def test_catalogo_crud_e_busca(api, session):
     r = await api.patch(f"/api/v1/products/{pid}", headers=admin, json={"preco": "13.00"})
     assert r.json()["preco"] == "13.00"
 
-    assert (await api.post("/api/v1/products/sync", headers=admin)).status_code == 202
-    assert api.app.state.queue.jobs[-1][0] == "sync_catalog"
+
+async def test_catalogo_importa_csv_e_xlsx_e_exporta(api, session):
+    await _user(session, Role.ADMIN, "admin@loja.com")
+    await _user(session, Role.ATENDENTE, "ana@loja.com")
+    admin = await _login(api, "admin@loja.com")
+    atendente = await _login(api, "ana@loja.com")
+
+    # CSV no padrão do Excel/LibreOffice em português: ";" e vírgula decimal.
+    csv_body = (
+        "SKU;Nome Técnico;Categoria;Unidade Venda;Preço;Atributos;Sinônimos;Ativo\r\n"
+        "ABR-10;Abraçadeira de Nylon 10cm;acessorios;pacotes;12,50;;enforca gato;sim\r\n"
+        "SEM-PRECO;Item sem preço;;;;;;sim\r\n"
+    ).encode("utf-8-sig")
+    files = {"arquivo": ("catalogo.csv", csv_body, "text/csv")}
+    r = await api.post("/api/v1/products/import", headers=admin, files=files)
+    assert r.json() == {"criados": 1, "atualizados": 0, "ignorados": 1}
+    negado = await api.post("/api/v1/products/import", headers=atendente, files=files)
+    assert negado.status_code == 403
+
+    exportado = await api.get("/api/v1/products/export?formato=xlsx", headers=admin)
+    assert exportado.headers["content-disposition"].endswith('catalogo.xlsx"')
+    # O XLSX exportado volta pela importação (o cliente edita e reenvia).
+    files = {"arquivo": ("catalogo.xlsx", exportado.content, "application/octet-stream")}
+    r = await api.post("/api/v1/products/import", headers=admin, files=files)
+    assert r.json() == {"criados": 0, "atualizados": 1, "ignorados": 0}
+
+    ruim = {"arquivo": ("lista.txt", b"oi", "text/plain")}
+    r = await api.post("/api/v1/products/import", headers=admin, files=ruim)
+    assert r.status_code == 422
+    sem_colunas = {"arquivo": ("x.csv", b"codigo;descricao\n1;a\n", "text/csv")}
+    r = await api.post("/api/v1/products/import", headers=admin, files=sem_colunas)
+    assert r.status_code == 422 and "nome_tecnico" in r.json()["detail"]
 
 
 async def test_horario_comercial_api(api, session):
@@ -322,3 +355,41 @@ async def test_aviso_fora_da_janela_de_24h(api, session):
     assert body["order"]["status"] == "cancelado"
     assert body["mensagem_enviada"] is False and "24 h" in body["aviso"]
     assert api.app.state.messenger.sent == []
+
+
+async def test_exporta_pedidos_em_csv_e_xlsx(api, session):
+    await _user(session, Role.ATENDENTE, "ana@loja.com")
+    headers = await _login(api, "ana@loja.com")
+    _, order = await _pedido_fechado(session, datetime.now(UTC))
+    session.add(
+        OrderItem(
+            order_id=order.id,
+            posicao=1,
+            descricao_original="2 tomadas",
+            item_normalizado="Tomada 10A",
+            quantidade=Decimal("2"),
+            unidade="unidades",
+            preco_unitario=Decimal("8.90"),
+            opcoes=[],
+        )
+    )
+    order.frete = Decimal("15.00")
+    await session.commit()
+
+    r = await api.get("/api/v1/orders/export?formato=csv", headers=headers)
+    text = r.content.decode("utf-8-sig")
+    header, linha = text.strip().split("\r\n")
+    assert header.startswith("data;pedido;status;cliente")
+    assert ";Tomada 10A;2;unidades;8,9;17,8;100;15;115;entrega;Rua A, 1;pix;" in linha
+
+    r = await api.get("/api/v1/orders/export?formato=xlsx", headers=headers)
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws["A1"].value == "data" and ws.max_row == 2
+    assert ws["N2"].value == 115  # total_pedido numérico, não texto
+
+    hoje = datetime.now(UTC).date()
+    vazio = await api.get(
+        f"/api/v1/orders/export?formato=csv&de={hoje + timedelta(days=2)}", headers=headers
+    )
+    assert vazio.content.decode("utf-8-sig").strip().count("\r\n") == 0

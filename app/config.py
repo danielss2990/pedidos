@@ -22,25 +22,25 @@ class Settings(BaseSettings):
     whatsapp_app_secret: str = ""
     whatsapp_verify_token: str = ""
 
-    # Claude (extração). A chave vem de ANTHROPIC_API_KEY, lida pelo SDK.
-    claude_model: str = "claude-opus-5-5"
-    claude_effort: str = "low"
-    claude_max_tokens: int = 8000
+    # IA de extração: modelo aberto servido pelo Ollama no próprio servidor.
+    llm_url: str = "http://localhost:11434"
+    llm_model_texto: str = "qwen2.5:7b"
+    llm_model_visao: str = "qwen2.5vl:7b"
+    llm_num_ctx: int = 8192
+    # Em CPU, ler uma foto pode levar minutos.
+    llm_timeout_segundos: int = 600
 
-    # Whisper (transcrição). A chave vem de OPENAI_API_KEY, lida pelo SDK.
-    whisper_model: str = "whisper-1"
+    # Transcrição de áudio: Whisper local (faster-whisper).
+    whisper_model: str = "small"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_download_dir: str = "models/whisper"
 
     # Loja e pagamento (usados nas mensagens de fechamento do pedido)
     loja_nome: str = "nossa loja"
     loja_endereco: str = ""
     pix_chave: str = ""
     pix_titular: str = ""
-
-    # Google Sheets
-    google_service_account_file: str = ""
-    google_sheets_id: str = ""
-    sheets_orders_tab: str = "Pedidos"
-    sheets_catalog_tab: str = "Catalogo"
 
     # Regras de negócio
     timezone: str = "America/Sao_Paulo"

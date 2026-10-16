@@ -132,7 +132,6 @@ class OrderOut(ORM):
     total_final: Decimal | None
     pago_em: datetime | None
     confirmado_em: datetime | None
-    exportado_planilha_em: datetime | None
     created_at: datetime
     customer: CustomerOut
     items: list[OrderItemOut]

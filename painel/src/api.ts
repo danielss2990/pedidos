@@ -17,6 +17,8 @@ type Query = Record<string, string | number | boolean | null | undefined>;
 interface RequestOptions {
   method?: string;
   body?: unknown;
+  /** Upload de arquivo (multipart); o navegador define o Content-Type. */
+  form?: FormData;
   query?: Query;
 }
 
@@ -58,7 +60,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
   return fetch(buildUrl(path, options.query), {
     method: options.method ?? "GET",
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.form ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
     credentials: "same-origin",
   });
 }
@@ -113,8 +115,21 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   return (await res.json()) as T;
 }
 
-export async function apiBlob(path: string): Promise<Blob> {
-  return (await request(path)).blob();
+export async function apiBlob(path: string, query?: Query): Promise<Blob> {
+  return (await request(path, { query })).blob();
+}
+
+/** Baixa um arquivo da API (com o token) e oferece ao navegador para salvar. */
+export async function download(path: string, query: Query, filename: string): Promise<void> {
+  const blob = await apiBlob(path, query);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 export async function login(email: string, senha: string): Promise<User> {

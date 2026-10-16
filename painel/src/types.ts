@@ -98,7 +98,6 @@ export interface Order {
   total_final: string | null;
   pago_em: string | null;
   confirmado_em: string | null;
-  exportado_planilha_em: string | null;
   created_at: string;
   customer: Customer;
   items: OrderItem[];

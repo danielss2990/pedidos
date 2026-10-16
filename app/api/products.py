@@ -1,13 +1,24 @@
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.deps import AdminUser, CurrentUser, QueueDep, SessionDep
+from app.api.orders import MEDIA_TYPES
+from app.deps import AdminUser, CurrentUser, SessionDep
 from app.models import AuditLog, Product, ProductSynonym
-from app.schemas import Page, ProductIn, ProductOut, ProductUpdate
-from app.services.catalog import build_search_text
+from app.schemas import Page, ProductIn, ProductOut, ProductUpdate, SyncOut
+from app.services.catalog import build_search_text, import_rows
+from app.services.export import (
+    CATALOG_HEADER,
+    MAX_IMPORT_BYTES,
+    ImportFileError,
+    product_rows,
+    read_table,
+    to_csv,
+    to_xlsx,
+)
 from app.services.text import normalize
 
 router = APIRouter(prefix="/api/v1/products", tags=["catálogo"])
@@ -92,7 +103,51 @@ async def update_product(
     return _out(product)
 
 
-@router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
-async def sync_catalog(_: AdminUser, queue: QueueDep) -> dict[str, str]:
-    await queue.enqueue_job("sync_catalog", _job_id="sync_catalog")
-    return {"resultado": "sincronização agendada"}
+@router.get("/export")
+async def export_products(
+    _: CurrentUser, session: SessionDep, formato: Literal["csv", "xlsx"] = "xlsx"
+) -> Response:
+    """Catálogo completo no mesmo formato aceito pela importação (serve de modelo)."""
+    products = (
+        await session.scalars(
+            select(Product).options(selectinload(Product.synonyms)).order_by(Product.sku)
+        )
+    ).all()
+    rows = product_rows(list(products))
+    content = (
+        to_csv(CATALOG_HEADER, rows)
+        if formato == "csv"
+        else to_xlsx(CATALOG_HEADER, rows, "Catalogo")
+    )
+    return Response(
+        content,
+        media_type=MEDIA_TYPES[formato],
+        headers={"Content-Disposition": f'attachment; filename="catalogo.{formato}"'},
+    )
+
+
+@router.post("/import", response_model=SyncOut)
+async def import_products(arquivo: UploadFile, admin: AdminUser, session: SessionDep) -> SyncOut:
+    """Cria ou atualiza produtos pelo SKU a partir de um CSV ou XLSX."""
+    data = await arquivo.read(MAX_IMPORT_BYTES + 1)
+    try:
+        rows = read_table(arquivo.filename or "", data)
+    except ImportFileError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    missing = {"sku", "nome_tecnico", "preco"} - set(rows[0].keys() if rows else [])
+    if missing:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Colunas obrigatórias ausentes: " + ", ".join(sorted(missing)),
+        )
+    stats = await import_rows(session, rows)
+    session.add(
+        AuditLog(
+            user_id=admin.id,
+            acao="importar",
+            entidade="product",
+            diff={"arquivo": arquivo.filename, **stats},
+        )
+    )
+    await session.commit()
+    return SyncOut(**stats)

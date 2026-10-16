@@ -27,7 +27,6 @@ services:
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'"
     volumes:
       - media:/app/media
-      - ./secrets:/app/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,12 +41,15 @@ services:
       DATABASE_URL: postgresql+asyncpg://pedidos:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/pedidos
       REDIS_URL: redis://redis:6379/0
       MEDIA_DIR: /app/media
+      LLM_URL: http://ollama:11434
+      WHISPER_DOWNLOAD_DIR: /app/models/whisper
     command: arq app.worker.WorkerSettings
     volumes:
       - media:/app/media
-      - ./secrets:/app/secrets:ro
+      - whisper_models:/app/models
     depends_on:
       - api
+      - ollama
 
   postgres:
     image: postgres:16
@@ -63,15 +65,38 @@ services:
       interval: 5s
       retries: 10
 
+  # Valkey: fork open source (BSD) do Redis, compatível com o cliente redis-py.
   redis:
-    image: redis:7
+    image: valkey/valkey:8
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: valkey-server --appendonly yes
     volumes:
       - redisdata:/data
+
+  # Modelos de linguagem abertos rodando no próprio servidor (CPU).
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_NUM_PARALLEL: 1
+    volumes:
+      - ollama_models:/root/.ollama
+
+  # Baixa os modelos na primeira subida (e confere nas seguintes); depois encerra.
+  ollama-pull:
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["sh", "-c", "ollama pull ${LLM_MODEL_TEXTO:-qwen2.5:7b} && ollama pull ${LLM_MODEL_VISAO:-qwen2.5vl:7b}"]
+    depends_on:
+      - ollama
+    restart: "no"
 
 volumes:
   caddy_data:
   pgdata:
   redisdata:
   media:
+  ollama_models:
+  whisper_models:

@@ -4,7 +4,7 @@ import logging
 import math
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -58,7 +58,7 @@ MAX_OPTIONS = 3
 OFF_HOURS_NOTICE_INTERVAL = timedelta(hours=12)
 IN_PROGRESS_NOTICE_INTERVAL = timedelta(hours=12)
 
-# Durante o fechamento o bot entende estes pedidos sem chamar o Claude.
+# Durante o fechamento o bot entende estes pedidos sem chamar o modelo de IA.
 WANTS_HUMAN = re.compile(r"\b(atendente|humano|pessoa|falar com alguem)\b")
 WANTS_CORRECTION = re.compile(r"\b(corrigir|alterar|mudar|trocar item|tirar)\b")
 
@@ -83,6 +83,7 @@ MSG_HANDOFF = "Vou chamar um atendente. Já já alguém da nossa equipe responde
 MSG_AUDIO_FAIL = "Não consegui entender o áudio. Pode mandar de novo ou escrever?"
 MSG_NOT_UNDERSTOOD = "Desculpe, não entendi bem. Pode escrever de outro jeito?"
 MSG_UNSUPPORTED = "Por enquanto consigo ler texto, áudio e foto. Pode mandar em um desses formatos?"
+MSG_READING_PHOTO = "Recebi a foto! Estou lendo a lista, pode levar um minutinho."
 MSG_ILLEGIBLE = "Não consegui ler a foto com segurança. Pode mandar outra mais nítida ou digitar?"
 MSG_EMPTY_ORDER = "Ainda não anotei nenhum item. Quais materiais você precisa?"
 MSG_CORRECTION = (
@@ -118,9 +119,8 @@ class Services:
 
 @dataclass
 class Outcome:
-    """Efeitos a executar depois do commit (ex.: exportar pedido para a planilha)."""
+    """Efeitos a executar depois do commit."""
 
-    export_order_ids: list[str] = field(default_factory=list)
     notify_panel: bool = False
 
 
@@ -238,7 +238,7 @@ class ConversationEngine:
                 return self.outcome
             stored.transcricao = texto
             self.session.add(
-                AiRun(message_id=stored.id, provedor="openai", modelo=self.settings.whisper_model)
+                AiRun(message_id=stored.id, provedor="whisper", modelo=self.settings.whisper_model)
             )
 
         if conversation.estado == ConversationState.FECHANDO:
@@ -250,6 +250,10 @@ class ConversationEngine:
             if await self._resolve_option(pending, int(texto)):
                 await self._after_change(order, changed=True, finalizar=False)
                 return self.outcome
+
+        if msg.kind == "image":
+            # O modelo de visão roda em CPU e pode demorar; o cliente sabe que foi recebida.
+            await self._send(MSG_READING_PHOTO)
 
         data = ExtractionInput(
             estado=conversation.estado.value,
@@ -267,8 +271,8 @@ class ConversationEngine:
             self.session.add(
                 AiRun(
                     message_id=stored.id,
-                    provedor="anthropic",
-                    modelo=self.settings.claude_model,
+                    provedor="ollama",
+                    modelo=self.settings.llm_model_texto,
                     erro=str(exc),
                 )
             )
@@ -280,7 +284,7 @@ class ConversationEngine:
         self.session.add(
             AiRun(
                 message_id=stored.id,
-                provedor="anthropic",
+                provedor="ollama",
                 modelo=result.modelo,
                 tokens_entrada=result.tokens_entrada,
                 tokens_saida=result.tokens_saida,
@@ -563,7 +567,6 @@ class ConversationEngine:
         order.status = OrderStatus.CONFIRMADO
         order.confirmado_em = self.s.now()
         self.conversation.estado = ConversationState.PEDIDO_EM_ANDAMENTO
-        self.outcome.export_order_ids.append(str(order.id))
         await self._send(closing_message(order, self.settings))
 
     async def _ask_correction(self, order: Order) -> None:

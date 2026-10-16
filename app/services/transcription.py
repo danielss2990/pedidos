@@ -1,20 +1,16 @@
-"""Transcrição de áudios do WhatsApp com o Whisper (OpenAI)."""
+"""Transcrição de áudios do WhatsApp com o Whisper rodando localmente (faster-whisper)."""
 
-from typing import Protocol
-
-import openai
+import asyncio
+import io
+import threading
+from typing import Any, Protocol
 
 from app.config import Settings
 
-EXTENSIONS = {
-    "audio/ogg": "ogg",
-    "audio/mpeg": "mp3",
-    "audio/mp4": "m4a",
-    "audio/aac": "m4a",
-    "audio/amr": "amr",
-    "audio/wav": "wav",
-    "audio/webm": "webm",
-}
+PROMPT = (
+    "Pedido de materiais elétricos: cabo flexível, disjuntor, tomada, interruptor, "
+    "eletroduto, mm², amperes."
+)
 
 
 class TranscriptionError(Exception):
@@ -25,22 +21,41 @@ class Transcriber(Protocol):
     async def transcribe(self, audio: bytes, mime: str) -> str: ...
 
 
-class WhisperTranscriber:
-    def __init__(self, settings: Settings, client: openai.AsyncOpenAI):
+class LocalWhisperTranscriber:
+    """Carrega o modelo na primeira transcrição e roda numa thread (é pesado em CPU)."""
+
+    def __init__(self, settings: Settings, model: Any = None):
         self.settings = settings
-        self.client = client
+        self._model = model
+        self._lock = threading.Lock()
+
+    def _get_model(self) -> Any:
+        with self._lock:
+            if self._model is None:
+                from faster_whisper import WhisperModel
+
+                self._model = WhisperModel(
+                    self.settings.whisper_model,
+                    device=self.settings.whisper_device,
+                    compute_type=self.settings.whisper_compute_type,
+                    download_root=self.settings.whisper_download_dir,
+                )
+            return self._model
+
+    def _run(self, audio: bytes) -> str:
+        segments, _info = self._get_model().transcribe(
+            io.BytesIO(audio),
+            language="pt",
+            initial_prompt=PROMPT,
+            vad_filter=True,
+        )
+        return " ".join(s.text.strip() for s in segments).strip()
 
     async def transcribe(self, audio: bytes, mime: str) -> str:
-        base_mime = mime.split(";")[0].strip()
-        ext = EXTENSIONS.get(base_mime, "ogg")
         try:
-            result = await self.client.audio.transcriptions.create(
-                model=self.settings.whisper_model,
-                file=(f"audio.{ext}", audio, base_mime),
-                language="pt",
-                prompt="Pedido de materiais elétricos: cabo flexível, disjuntor, tomada, "
-                "interruptor, eletroduto, mm², amperes.",
-            )
-        except openai.OpenAIError as exc:
+            text = await asyncio.to_thread(self._run, audio)
+        except Exception as exc:  # áudio corrompido, modelo ausente etc.
             raise TranscriptionError(str(exc)) from exc
-        return result.text.strip()
+        if not text:
+            raise TranscriptionError("áudio sem fala reconhecível")
+        return text

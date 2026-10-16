@@ -1,7 +1,7 @@
 """Armazenamento das mídias recebidas (áudios e fotos).
 
-No MVP grava em disco no volume do VPS; trocar por Cloudflare R2 exige só outra
-implementação com os mesmos métodos.
+No MVP grava em disco no volume do servidor; trocar por um armazenamento S3 compatível
+(ex.: MinIO) exige só outra implementação com os mesmos métodos.
 """
 
 import time

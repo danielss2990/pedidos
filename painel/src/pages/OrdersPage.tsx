@@ -3,8 +3,8 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { api } from "../api";
-import { ErrorBox, Empty, Modal, OrderBadge } from "../components/ui";
+import { api, download } from "../api";
+import { ErrorBox, Empty, Field, Modal, OrderBadge } from "../components/ui";
 import {
   MODALIDADE_LABEL,
   ORDER_STATUS_LABEL,
@@ -26,6 +26,7 @@ export default function OrdersPage() {
   const [view, setView] = useState<View>("andamento");
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
 
   const orders = useQuery({
     queryKey: ["orders", view, status, page],
@@ -82,6 +83,11 @@ export default function OrdersPage() {
             ))}
           </select>
         )}
+        <div className="actions">
+          <button className="btn" onClick={() => setExporting(true)}>
+            Exportar
+          </button>
+        </div>
       </header>
       <ErrorBox error={orders.error} />
       <div className="table-wrap">
@@ -147,6 +153,7 @@ export default function OrdersPage() {
       )}
 
       {id && <OrderModal id={id} onClose={() => navigate("/pedidos")} />}
+      {exporting && <ExportModal onClose={() => setExporting(false)} />}
     </div>
   );
 }
@@ -384,5 +391,60 @@ function OrderActions({
         )}
       </div>
     </section>
+  );
+}
+
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function ExportModal({ onClose }: { onClose: () => void }) {
+  const today = new Date();
+  const [de, setDe] = useState(isoDate(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [ate, setAte] = useState(isoDate(today));
+  const [formato, setFormato] = useState<"xlsx" | "csv">("xlsx");
+  const run = useMutation({
+    mutationFn: () =>
+      download("/api/v1/orders/export", { formato, de, ate }, `pedidos_${de}_a_${ate}.${formato}`),
+    onSuccess: onClose,
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    run.mutate();
+  }
+
+  return (
+    <Modal
+      title="Exportar pedidos"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn primary" type="submit" form="export-form" disabled={run.isPending}>
+            {run.isPending ? "Gerando…" : "Baixar"}
+          </button>
+        </>
+      }
+    >
+      <form id="export-form" className="form-grid" onSubmit={submit}>
+        <Field label="De">
+          <input type="date" required value={de} onChange={(e) => setDe(e.target.value)} />
+        </Field>
+        <Field label="Até">
+          <input type="date" required value={ate} onChange={(e) => setAte(e.target.value)} />
+        </Field>
+        <Field label="Formato" hint="XLSX abre no LibreOffice Calc ou no Excel; CSV usa ponto e vírgula.">
+          <select value={formato} onChange={(e) => setFormato(e.target.value as "xlsx" | "csv")}>
+            <option value="xlsx">Planilha (XLSX)</option>
+            <option value="csv">CSV</option>
+          </select>
+        </Field>
+      </form>
+      <p className="muted">Pedidos fechados no período, uma linha por item, com entrega, pagamento e frete.</p>
+      <ErrorBox error={run.error} />
+    </Modal>
   );
 }

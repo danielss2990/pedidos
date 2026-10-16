@@ -1,15 +1,25 @@
 import uuid
-from datetime import UTC, datetime
-from typing import Annotated
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.deps import CurrentUser, MessengerDep, SessionDep
-from app.models import ACTIVE_ORDER_STATUSES, AuditLog, Conversation, Order, OrderStatus, User
+from app.models import (
+    ACTIVE_ORDER_STATUSES,
+    OPEN_ORDER_STATUSES,
+    AuditLog,
+    Conversation,
+    Order,
+    OrderItem,
+    OrderStatus,
+    User,
+)
 from app.schemas import FreteIn, OrderActionOut, OrderOut, PagamentoIn, Page, StatusIn
+from app.services.export import ORDER_HEADER, order_rows, to_csv, to_xlsx
 from app.services.fulfillment import FulfillmentError, TeamActions
 
 router = APIRouter(prefix="/api/v1/orders", tags=["pedidos"])
@@ -42,6 +52,51 @@ async def list_orders(
         _with_details(query).order_by(ordering).limit(limit).offset(offset)
     )
     return Page(items=[OrderOut.model_validate(o) for o in rows], total=total)
+
+
+MEDIA_TYPES = {
+    "csv": "text/csv; charset=utf-8",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+@router.get("/export")
+async def export_orders(
+    _: CurrentUser,
+    session: SessionDep,
+    formato: Literal["csv", "xlsx"] = "xlsx",
+    de: date | None = None,
+    ate: date | None = None,
+    status_: Annotated[OrderStatus | None, Query(alias="status")] = None,
+) -> Response:
+    """Pedidos fechados no período (datas no fuso da loja), uma linha por item."""
+    settings = get_settings()
+    query = select(Order).where(Order.status.not_in(OPEN_ORDER_STATUSES))
+    if status_ is not None:
+        query = query.where(Order.status == status_)
+    if de is not None:
+        query = query.where(Order.confirmado_em >= datetime.combine(de, time(), settings.tz))
+    if ate is not None:
+        limite = datetime.combine(ate + timedelta(days=1), time(), settings.tz)
+        query = query.where(Order.confirmado_em < limite)
+    orders = (
+        await session.scalars(
+            query.options(
+                selectinload(Order.items).selectinload(OrderItem.product),
+                selectinload(Order.customer),
+            ).order_by(Order.confirmado_em)
+        )
+    ).all()
+    rows = order_rows(list(orders), settings)
+    content = (
+        to_csv(ORDER_HEADER, rows) if formato == "csv" else to_xlsx(ORDER_HEADER, rows, "Pedidos")
+    )
+    nome = f"pedidos_{datetime.now(settings.tz):%Y-%m-%d}.{formato}"
+    return Response(
+        content,
+        media_type=MEDIA_TYPES[formato],
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 async def _load(session: SessionDep, order_id: uuid.UUID) -> Order:

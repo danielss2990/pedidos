@@ -243,7 +243,6 @@ class Order(TimestampMixin, Base):
     # Informado pela equipe nos pedidos com entrega.
     frete: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     pago_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    exportado_planilha_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Cliente pediu para fechar enquanto havia dúvida aberta: mostrar o resumo ao resolvê-la.
     finalizar_pendente: Mapped[bool] = mapped_column(Boolean, default=False)
